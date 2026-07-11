@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>MiniVue · Слой 5: Router</title>
+    <style>
+      body { font-family: -apple-system, system-ui, sans-serif; max-width: 640px; margin: 40px auto; padding: 0 20px; line-height: 1.6; }
+      h1 { font-size: 22px; }
+      .muted { color: #6b7280; font-size: 14px; }
+      nav { display: flex; gap: 14px; padding: 12px 0; border-bottom: 1px solid #e3e6ea; margin-bottom: 16px; }
+      nav a { color: #2563eb; text-decoration: none; }
+      nav a:hover { text-decoration: underline; }
+      .card { border: 1px solid #e3e6ea; border-radius: 12px; padding: 16px 20px; background: #fbfcfd; }
+      code { background: #eef1f4; padding: 1px 6px; border-radius: 4px; font-family: Menlo, monospace; font-size: 13px; }
+    </style>
+  </head>
+  <body>
+    <h1>MiniVue · Слой 5: Router</h1>
+    <p class="muted">
+      Мультистраничное SPA без перезагрузки. <code>RouterLink</code> меняет адрес
+      (режим hash: <code>#/about</code>), <code>RouterView</code> показывает
+      компонент текущего маршрута. Параметр <code>:id</code> прилетает в компонент
+      через <code>useRoute()</code>. Смотрите на адресную строку при переходах.
+    </p>
+    <div id="app"></div>
+
+    <script type="module">
+      import { createApp } from '../packages/minivue.js'
+      import {
+        createRouter,
+        createWebHashHistory,
+        useRoute,
+      } from '../packages/router/index.js'
+
+      const Home = { template: '<div class="card"><h2>Главная</h2><p>Добро пожаловать в MiniVue.</p></div>' }
+      const About = { template: '<div class="card"><h2>О проекте</h2><p>Учебный аналог Vue, собранный с нуля.</p></div>' }
+      const User = {
+        setup: () => ({ route: useRoute() }),
+        template: `
+          <div class="card">
+            <h2>Пользователь #{{ route.params.id }}</h2>
+            <p>Параметр :id взят из адреса через useRoute().</p>
+          </div>
+        `,
+      }
+
+      const router = createRouter({
+        history: createWebHashHistory(),
+        routes: [
+          { path: '/', component: Home },
+          { path: '/about', component: About },
+          { path: '/user/:id', component: User },
+        ],
+      })
+
+      const App = {
+        template: `
+          <div>
+            <nav>
+              <RouterLink to="/">Главная</RouterLink>
+              <RouterLink to="/about">О проекте</RouterLink>
+              <RouterLink to="/user/7">Пользователь 7</RouterLink>
+              <RouterLink to="/user/99">Пользователь 99</RouterLink>
+            </nav>
+            <RouterView />
+          </div>
+        `,
+      }
+
+      createApp(App).use(router).mount('#app')
+    </script>
+  </body>
+</html>

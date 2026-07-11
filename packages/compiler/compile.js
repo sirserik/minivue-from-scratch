@@ -17,6 +17,7 @@
 
 import { parse, NodeTypes } from './parse.js'
 import { h, Fragment } from '../runtime-core/vnode.js'
+import { resolveComponent } from '../runtime-core/component.js'
 
 // Публичная функция: строка-шаблон → готовая render-функция.
 export function compile(template) {
@@ -38,6 +39,7 @@ function createRenderFunction(code) {
   //   h, Fragment — из рантайма.
   const _s = (v) => (v == null ? '' : String(v))
   const _l = renderList
+  const _c = resolveComponent // разрешение компонентов по имени
 
   // Функция-фабрика создаёт render со всеми помощниками в области видимости.
   // with(ctx) внутри позволяет писать в шаблоне count вместо ctx.count.
@@ -47,9 +49,10 @@ function createRenderFunction(code) {
     'Fragment',
     '_s',
     '_l',
+    '_c',
     `return function render(ctx){ with(ctx){ return ${code} } }`,
   )
-  return factory(h, Fragment, _s, _l)
+  return factory(h, Fragment, _s, _l, _c)
 }
 
 // _l: отрисовать список для v-for. Поддерживает массивы, числа (1..n) и объекты.
@@ -113,10 +116,18 @@ function genElement(node) {
 
 // Сгенерировать h('tag', props, children) без учёта v-for/v-if.
 function genElementWithoutStructural(node, directives) {
-  const tag = JSON.stringify(node.tag)
+  // Тег с большой буквы или с дефисом (RouterView, router-view) считаем
+  // компонентом и разрешаем через _c по имени. Остальное — обычный HTML-тег.
+  const tag = isComponentTag(node.tag)
+    ? `_c(${JSON.stringify(node.tag)})`
+    : JSON.stringify(node.tag)
   const props = genProps(directives)
   const children = genChildren(node.children)
   return `h(${tag}, ${props}, ${children})`
+}
+
+function isComponentTag(tag) {
+  return /^[A-Z]/.test(tag) || tag.includes('-')
 }
 
 // --- атрибуты и обработчики → объект props ---------------------------------

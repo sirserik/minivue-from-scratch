@@ -54,6 +54,19 @@ export function registerRuntimeCompiler(fn) {
 
 let uid = 0
 
+// resolveComponent — найти компонент по имени среди зарегистрированных
+// (app.component('RouterView', ...)). Нужен компилятору: тег <RouterView> в
+// шаблоне превращается в _c('RouterView'). Ищем в контексте текущего
+// рендерящегося компонента; не нашли — возвращаем имя как строку (обычный тег).
+export function resolveComponent(name) {
+  const instance = currentRenderingInstance
+  if (instance) {
+    const components = instance.appContext.components
+    if (components[name]) return components[name]
+  }
+  return name
+}
+
 // ---------------------------------------------------------------------------
 //  createComponentSystem — фабрика, которую вызывает рендерер через
 //  __installComponents. Получает «внутренности» рендерера (patch, unmount) и
@@ -349,6 +362,11 @@ const PublicInstanceHandlers = {
         return instance.props
       case '$el':
         return instance.vnode.el
+    }
+    // Глобальные свойства приложения (например, $router/$route от плагинов).
+    const globalProps = instance.appContext.config.globalProperties
+    if (globalProps && key in globalProps) {
+      return globalProps[key]
     }
     return undefined
   },
