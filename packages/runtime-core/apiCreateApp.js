@@ -47,6 +47,13 @@ export function createAppAPI(render) {
         return app
       },
 
+      // Зарегистрировать глобальную директиву (v-focus и т.п.).
+      directive(name, def) {
+        if (!def) return context.directives[name]
+        context.directives[name] = def
+        return app
+      },
+
       mount(containerOrSelector) {
         if (isMounted) return
         rootContainer =

@@ -2,7 +2,7 @@
 // Браузерную «сборку» см. в packages/runtime-dom/index.js.
 
 // Virtual DOM
-export { h, createVNode, isVNode, normalizeVNode, Text, Fragment } from './vnode.js'
+export { h, createVNode, isVNode, normalizeVNode, withDirectives, Text, Fragment } from './vnode.js'
 
 // Рендерер
 export { createRenderer } from './renderer.js'

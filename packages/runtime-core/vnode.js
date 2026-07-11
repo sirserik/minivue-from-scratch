@@ -69,6 +69,20 @@ export function isVNode(value) {
   return value != null && typeof value === 'object' && 'type' in value && 'el' in value
 }
 
+// withDirectives(vnode, [[dir, value, arg, modifiers], ...]) — прицепить к vnode
+// список кастомных директив. Рендерер потом вызовет их хуки (mounted/updated/
+// unmounted). Компилятор генерирует именно такой вызов для v-focus, v-color и т.п.
+export function withDirectives(vnode, directives) {
+  vnode.dirs = directives.map(([dir, value, arg, modifiers]) => ({
+    dir,
+    value,
+    oldValue: undefined,
+    arg,
+    modifiers: modifiers || {},
+  }))
+  return vnode
+}
+
 // Привести «сырое» дитя к VNode. Строки и числа заворачиваем в текстовый узел,
 // чтобы рендерер работал с однородным деревом из одних только VNode.
 export function normalizeVNode(child) {

@@ -124,6 +124,10 @@ export function createSSRApp(rootComponent, rootProps = null) {
       context.components[name] = comp
       return app
     },
+    directive(name, def) {
+      context.directives[name] = def
+      return app
+    },
     renderToString() {
       const vnode = createVNode(rootComponent, rootProps)
       vnode.appContext = context

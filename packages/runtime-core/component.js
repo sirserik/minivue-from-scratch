@@ -61,10 +61,26 @@ let uid = 0
 export function resolveComponent(name) {
   const instance = currentRenderingInstance
   if (instance) {
-    const components = instance.appContext.components
-    if (components[name]) return components[name]
+    // Сначала локальные (опция components компонента), потом глобальные.
+    const local = instance.type.components
+    if (local && local[name]) return local[name]
+    const global = instance.appContext.components
+    if (global[name]) return global[name]
   }
   return name
+}
+
+// resolveDirective — найти директиву по имени (app.directive('focus', ...) или
+// локальная directives-опция компонента). Нужна компилятору: v-focus → _dir('focus').
+export function resolveDirective(name) {
+  const instance = currentRenderingInstance
+  if (instance) {
+    const local = instance.type.directives
+    if (local && local[name]) return local[name]
+    const global = instance.appContext.directives
+    if (global && global[name]) return global[name]
+  }
+  return null
 }
 
 // ---------------------------------------------------------------------------
@@ -431,6 +447,7 @@ const PublicInstanceHandlers = {
 export const defaultAppContext = {
   provides: Object.create(null),
   components: Object.create(null),
+  directives: Object.create(null),
   config: { globalProperties: {} },
 }
 
@@ -438,6 +455,7 @@ export function createAppContext() {
   return {
     provides: Object.create(null),
     components: Object.create(null),
+    directives: Object.create(null),
     config: { globalProperties: {} },
   }
 }

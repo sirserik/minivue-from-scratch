@@ -113,6 +113,19 @@ export function createRenderer(options) {
 
     // 4. Вставляем готовый элемент в родителя (перед якорем или в конец).
     hostInsert(el, container, anchor)
+
+    // 5. Кастомные директивы: элемент появился в DOM — зовём их mounted-хук.
+    invokeDirectives(vnode, 'mounted')
+  }
+
+  // Вызвать одноимённый хук у всех директив, навешанных на vnode.
+  function invokeDirectives(vnode, name) {
+    const dirs = vnode.dirs
+    if (!dirs) return
+    for (const binding of dirs) {
+      const hook = binding.dir && binding.dir[name]
+      if (hook) hook(vnode.el, binding, vnode)
+    }
   }
 
   function mountChildren(children, container, anchor) {
@@ -128,6 +141,14 @@ export function createRenderer(options) {
     const el = (n2.el = n1.el)
     patchProps(el, n1.props, n2.props)
     patchChildren(n1, n2, el, null)
+
+    // Директивы: переносим прошлые значения в oldValue и зовём updated-хук.
+    if (n2.dirs) {
+      n2.dirs.forEach((binding, i) => {
+        binding.oldValue = n1.dirs ? n1.dirs[i].value : undefined
+      })
+      invokeDirectives(n2, 'updated')
+    }
   }
 
   // Сравнить наборы атрибутов: обновить/добавить новые, убрать исчезнувшие.
@@ -319,7 +340,10 @@ export function createRenderer(options) {
       unmountComponent(vnode)
       return
     }
+    // Директивы: хук перед удалением элемента из DOM.
+    invokeDirectives(vnode, 'beforeUnmount')
     hostRemove(vnode.el)
+    invokeDirectives(vnode, 'unmounted')
   }
 
   // -------------------------------------------------------------------------
