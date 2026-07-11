@@ -52,11 +52,51 @@ export function createRenderer(options) {
       processFragment(n1, n2, container, anchor)
     } else if (typeof type === 'string') {
       processElement(n1, n2, container, anchor)
+    } else if (type && type.__isTeleport) {
+      // Teleport (слой 11): дети уезжают в другой контейнер.
+      processTeleport(n1, n2, container, anchor)
     } else if (typeof type === 'object' || typeof type === 'function') {
-      // Компоненты появятся в слое 3 — там мы допишем processComponent и
-      // подключим его сюда. Пока честно сообщаем, что рано.
-      processComponent(n1, n2, container, anchor)
+      if (n1 == null && n2.__keptAlive) {
+        // KeepAlive-активация: не монтируем заново, а возвращаем спрятанный DOM.
+        hostInsert(n2.component.subTree.el, container, anchor)
+        n2.el = n2.component.subTree.el
+      } else {
+        // Обычный компонент (реализация из слоя 3).
+        processComponent(n1, n2, container, anchor)
+      }
     }
+  }
+
+  // --- Teleport -------------------------------------------------------------
+  function processTeleport(n1, n2, container, anchor) {
+    const target = resolveTeleportTarget(n2.props)
+    if (n1 == null) {
+      // Ставим пустой якорь на исходном месте (чтобы соседи не сбились),
+      // а детей монтируем в целевой контейнер.
+      n2.el = hostCreateText('')
+      hostInsert(n2.el, container, anchor)
+      n2.target = target
+      if (target && Array.isArray(n2.children)) mountChildren(n2.children, target, null)
+    } else {
+      n2.el = n1.el
+      n2.target = n1.target
+      patchChildren(n1, n2, n1.target, null)
+    }
+  }
+
+  function resolveTeleportTarget(props) {
+    const to = props && props.to
+    if (typeof to === 'string') {
+      return options.querySelector ? options.querySelector(to) : null
+    }
+    return to || null // передали сам элемент
+  }
+
+  // Ленивое «хранилище» — off-DOM контейнер, куда прячутся деактивированные
+  // KeepAlive-компоненты (их DOM живёт там, пока их снова не покажут).
+  let _storage = null
+  function keepAliveStorage() {
+    return _storage || (_storage = hostCreateElement('div'))
   }
 
   // --- Текстовые узлы -------------------------------------------------------
@@ -333,6 +373,18 @@ export function createRenderer(options) {
     if (vnode.type === Fragment) {
       // У фрагмента нет своего узла — размонтируем его детей.
       unmountChildren(vnode.children)
+      return
+    }
+    if (vnode.type && vnode.type.__isTeleport) {
+      // Teleport: убираем детей из целевого контейнера и якорь-заглушку.
+      unmountChildren(vnode.children)
+      hostRemove(vnode.el)
+      return
+    }
+    if (vnode.__shouldKeepAlive && vnode.component) {
+      // KeepAlive-деактивация: НЕ разрушаем инстанс, а прячем его DOM в
+      // хранилище. Состояние компонента сохраняется до следующего показа.
+      hostInsert(vnode.component.subTree.el, keepAliveStorage())
       return
     }
     // Даём компонентам шанс размонтироваться правильно (слой 3 доопределит).

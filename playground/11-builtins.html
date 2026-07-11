@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>MiniVue · Слой 11: Встроенные компоненты</title>
+    <style>
+      body { font-family: -apple-system, system-ui, sans-serif; max-width: 640px; margin: 40px auto; padding: 0 20px; line-height: 1.6; }
+      h1 { font-size: 22px; }
+      .muted { color: #6b7280; font-size: 14px; }
+      .card { border: 1px solid #e3e6ea; border-radius: 12px; padding: 16px 20px; margin: 14px 0; background: #fbfcfd; }
+      input { font-size: 15px; padding: 8px 10px; border: 1px solid #cdd2d8; border-radius: 8px; }
+      button { font-size: 14px; padding: 6px 12px; border: 1px solid #cdd2d8; border-radius: 8px; background: #fff; cursor: pointer; margin-right: 6px; }
+      button.active { background: #111827; color: #fff; }
+      .backdrop { position: fixed; inset: 0; background: rgba(0,0,0,.4); display: flex; align-items: center; justify-content: center; }
+      .modal { background: #fff; padding: 24px; border-radius: 12px; min-width: 280px; }
+      code { background: #eef1f4; padding: 1px 6px; border-radius: 4px; font-family: Menlo, monospace; font-size: 13px; }
+    </style>
+  </head>
+  <body>
+    <h1>MiniVue · Слой 11: Встроенные компоненты</h1>
+    <p class="muted">
+      <code>Teleport</code> выносит модалку в конец <code>body</code>.
+      <code>KeepAlive</code> хранит состояние вкладок (текст в поле не теряется при
+      переключении). <code>defineAsyncComponent</code> грузит блок по требованию.
+    </p>
+    <div id="app"></div>
+    <!-- сюда Teleport перенесёт модалку -->
+    <div id="modals"></div>
+
+    <script type="module">
+      import { createApp, ref, shallowRef, defineAsyncComponent } from '../packages/minivue.js'
+
+      // Вкладки с собственным состоянием (проверяем KeepAlive).
+      const TabA = {
+        setup: () => ({ text: ref('') }),
+        template: `<div class="card">Вкладка A. Впишите что-нибудь и переключитесь:
+          <input v-model="text" placeholder="сохранится через KeepAlive" /></div>`,
+      }
+      const TabB = { template: `<div class="card">Вкладка B — просто текст.</div>` }
+
+      // Асинхронный блок: «грузится» полсекунды.
+      const AsyncBlock = defineAsyncComponent(
+        () =>
+          new Promise((resolve) =>
+            setTimeout(() => resolve({ template: '<div class="card">Загруженный блок ✅</div>' }), 600),
+          ),
+      )
+
+      const App = {
+        components: { TabA, TabB, AsyncBlock },
+        setup() {
+          const tab = shallowRef(TabA)
+          const tabs = [
+            { name: 'Вкладка A', comp: TabA },
+            { name: 'Вкладка B', comp: TabB },
+          ]
+          const showModal = ref(false)
+          return { tab, tabs, showModal }
+        },
+        template: `
+          <div>
+            <div class="card">
+              <button v-for="t in tabs" :key="t.name"
+                      :class="{ active: tab === t.comp }"
+                      @click="tab = t.comp">{{ t.name }}</button>
+              <button @click="showModal = true">Открыть модалку</button>
+            </div>
+
+            <KeepAlive><component :is="tab" /></KeepAlive>
+
+            <AsyncBlock />
+
+            <Teleport to="#modals">
+              <div class="backdrop" v-if="showModal" @click.self="showModal = false">
+                <div class="modal">
+                  <h3>Модалка через Teleport</h3>
+                  <p class="muted">В разметке я внутри App, а в DOM — в #modals.</p>
+                  <button @click="showModal = false">Закрыть</button>
+                </div>
+              </div>
+            </Teleport>
+          </div>
+        `,
+      }
+
+      createApp(App).mount('#app')
+    </script>
+  </body>
+</html>

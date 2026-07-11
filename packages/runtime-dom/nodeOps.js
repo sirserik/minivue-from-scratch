@@ -49,4 +49,9 @@ export const nodeOps = {
   parentNode(node) {
     return node.parentNode
   },
+
+  // Найти элемент по селектору — нужно Teleport'у для строкового to="#modals".
+  querySelector(selector) {
+    return document.querySelector(selector)
+  },
 }

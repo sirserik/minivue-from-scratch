@@ -24,6 +24,7 @@ import { reactive, proxyRefs, ReactiveEffect } from '../reactivity/index.js'
 import { normalizeVNode, isVNode } from './vnode.js'
 import { queueJob } from './scheduler.js'
 import { invokeHooks } from './apiLifecycle.js'
+import { BUILTIN_COMPONENTS } from './builtins.js'
 
 // ---- Текущий компонент ----------------------------------------------------
 //  Пока выполняется setup() компонента, ссылка на его инстанс лежит здесь. Так
@@ -59,6 +60,8 @@ let uid = 0
 // шаблоне превращается в _c('RouterView'). Ищем в контексте текущего
 // рендерящегося компонента; не нашли — возвращаем имя как строку (обычный тег).
 export function resolveComponent(name) {
+  // Встроенные (Teleport, KeepAlive) — доступны всегда, без регистрации.
+  if (BUILTIN_COMPONENTS[name]) return BUILTIN_COMPONENTS[name]
   const instance = currentRenderingInstance
   if (instance) {
     // Сначала локальные (опция components компонента), потом глобальные.
@@ -193,7 +196,7 @@ export function createComponentSystem(internals) {
     instance.vnode = nextVNode
     nextVNode.el = instance.subTree ? instance.subTree.el : null
     updateProps(instance, nextVNode)
-    instance.slots = normalizeSlots(nextVNode.children)
+    updateSlots(instance, nextVNode.children)
   }
 
   function unmountComponent(vnode) {
@@ -257,8 +260,18 @@ function createComponentInstance(vnode, parent) {
 // Подготовить компонент к работе: props, slots, setup.
 function setupComponent(instance) {
   initProps(instance)
-  instance.slots = normalizeSlots(instance.vnode.children)
+  updateSlots(instance, instance.vnode.children)
   setupStatefulComponent(instance)
+}
+
+// Обновить слоты, СОХРАНИВ ссылку на объект instance.slots. Это важно: setup мог
+// захватить slots в замыкание (например, KeepAlive возвращает () => slots.default()).
+// Если переприсвоить instance.slots новым объектом, замыкание увидит старый.
+// Поэтому переносим содержимое в тот же объект.
+function updateSlots(instance, children) {
+  const normalized = normalizeSlots(children)
+  for (const key in instance.slots) delete instance.slots[key]
+  Object.assign(instance.slots, normalized)
 }
 
 function setupStatefulComponent(instance) {

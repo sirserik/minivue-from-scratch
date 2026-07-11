@@ -25,6 +25,7 @@ else
     "$ROOT/book/chapters/08-forms.md"
     "$ROOT/book/chapters/09-reactivity-extras.md"
     "$ROOT/book/chapters/10-directives.md"
+    "$ROOT/book/chapters/11-builtins.md"
   )
 fi
 

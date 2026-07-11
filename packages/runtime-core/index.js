@@ -32,6 +32,9 @@ export {
 // provide / inject
 export { provide, inject } from './apiInject.js'
 
+// Встроенные компоненты
+export { Teleport, KeepAlive, defineAsyncComponent } from './builtins.js'
+
 // Реэкспорт реактивности — чтобы приложению хватало одного пакета.
 export {
   ref,
