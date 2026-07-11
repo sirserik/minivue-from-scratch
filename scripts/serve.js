@@ -38,7 +38,12 @@ const server = http.createServer((req, res) => {
       return res.end('404: ' + urlPath)
     }
     const type = MIME[path.extname(filePath)] || 'application/octet-stream'
-    res.writeHead(200, { 'Content-Type': type })
+    // no-store — чтобы браузер НИКОГДА не кэшировал модули. Иначе после правок
+    // подтягивается смесь старых и новых версий → трудноуловимые баги.
+    res.writeHead(200, {
+      'Content-Type': type,
+      'Cache-Control': 'no-store, no-cache, must-revalidate',
+    })
     res.end(data)
   })
 })
