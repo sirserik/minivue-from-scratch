@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>MiniVue · Слой 8: Формы и привязки</title>
+    <style>
+      body { font-family: -apple-system, system-ui, sans-serif; max-width: 640px; margin: 40px auto; padding: 0 20px; line-height: 1.6; }
+      h1 { font-size: 22px; }
+      .muted { color: #6b7280; font-size: 14px; }
+      .card { border: 1px solid #e3e6ea; border-radius: 12px; padding: 20px; margin: 14px 0; background: #fbfcfd; }
+      label { display: block; margin: 10px 0 4px; font-weight: 600; font-size: 14px; }
+      input[type=text], select { font-size: 15px; padding: 8px 10px; border: 1px solid #cdd2d8; border-radius: 8px; width: 100%; box-sizing: border-box; }
+      button { font-size: 15px; padding: 8px 16px; border: 1px solid #cdd2d8; border-radius: 8px; background: #fff; cursor: pointer; }
+      .tag { display: inline-block; padding: 2px 10px; border-radius: 999px; font-size: 13px; }
+      .tag.on { background: #dcfce7; color: #166534; }
+      .tag.off { background: #fee2e2; color: #991b1b; }
+      pre { background: #f6f8fa; padding: 12px; border-radius: 8px; font-size: 13px; }
+      code { background: #eef1f4; padding: 1px 6px; border-radius: 4px; font-family: Menlo, monospace; font-size: 13px; }
+    </style>
+  </head>
+  <body>
+    <h1>MiniVue · Слой 8: Формы и привязки</h1>
+    <p class="muted">
+      <code>v-model</code> связывает поля с состоянием в обе стороны, <code>:class</code>
+      принимает объект, <code>@submit.prevent</code> и <code>@keyup.enter</code> —
+      модификаторы событий. Поля и «живое состояние» ниже всегда синхронны.
+    </p>
+    <div id="app"></div>
+
+    <script type="module">
+      import { createApp, reactive, computed } from '../packages/minivue.js'
+
+      const App = {
+        setup() {
+          const form = reactive({ name: '', role: 'user', subscribe: true })
+          const greeting = computed(() =>
+            form.name ? `Привет, ${form.name}!` : 'Введите имя',
+          )
+          const submitted = reactive({ value: null })
+          const submit = () => (submitted.value = JSON.stringify(form, null, 2))
+          return { form, greeting, submitted, submit }
+        },
+        template: `
+          <div class="card">
+            <form @submit.prevent="submit">
+              <label>Имя (v-model + @keyup.enter)</label>
+              <input type="text" v-model="form.name" @keyup.enter="submit"
+                     placeholder="Наберите и нажмите Enter" />
+
+              <label>Роль (v-model на select)</label>
+              <select v-model="form.role">
+                <option value="user">Пользователь</option>
+                <option value="admin">Администратор</option>
+              </select>
+
+              <label>
+                <input type="checkbox" v-model="form.subscribe" />
+                Подписка (v-model на чекбоксе)
+              </label>
+
+              <p>
+                <!-- :class объектом: класс включается по условию -->
+                <span class="tag" :class="{ on: form.subscribe, off: !form.subscribe }">
+                  {{ form.subscribe ? 'подписан' : 'без подписки' }}
+                </span>
+              </p>
+
+              <p class="muted">{{ greeting }}</p>
+              <button type="submit">Отправить (Enter тоже работает)</button>
+            </form>
+          </div>
+
+          <div class="card" v-if="submitted.value">
+            <strong>Отправлено:</strong>
+            <pre>{{ submitted.value }}</pre>
+          </div>
+        `,
+      }
+
+      createApp(App).mount('#app')
+    </script>
+  </body>
+</html>

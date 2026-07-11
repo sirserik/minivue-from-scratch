@@ -13,6 +13,7 @@
 
 import { Text, Fragment, createVNode, normalizeVNode } from '../runtime-core/vnode.js'
 import { createSSRComponent, createAppContext } from '../runtime-core/component.js'
+import { normalizeClass, styleToString } from '../shared.js'
 
 // Теги без содержимого и закрывающего тега.
 const VOID_TAGS = new Set(['br', 'hr', 'img', 'input', 'meta', 'link'])
@@ -74,8 +75,12 @@ function renderAttrs(props) {
     const value = props[key]
     if (value == null || value === false) continue
 
-    if (key === 'style' && value && typeof value === 'object') {
-      out += ` style="${escapeAttr(styleToString(value))}"`
+    if (key === 'class') {
+      const cls = normalizeClass(value)
+      if (cls) out += ` class="${escapeAttr(cls)}"`
+    } else if (key === 'style') {
+      const style = styleToString(value)
+      if (style) out += ` style="${escapeAttr(style)}"`
     } else if (value === true) {
       out += ` ${key}` // булев атрибут: <input disabled>
     } else {
@@ -83,16 +88,6 @@ function renderAttrs(props) {
     }
   }
   return out
-}
-
-function styleToString(style) {
-  return Object.keys(style)
-    .map((k) => {
-      // camelCase → kebab-case: backgroundColor → background-color.
-      const prop = k.replace(/[A-Z]/g, (m) => '-' + m.toLowerCase())
-      return `${prop}:${style[k]}`
-    })
-    .join(';')
 }
 
 // Экранирование, чтобы данные пользователя не ломали разметку и не давали XSS.

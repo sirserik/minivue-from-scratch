@@ -40,6 +40,7 @@ function createRenderFunction(code) {
   const _s = (v) => (v == null ? '' : String(v))
   const _l = renderList
   const _c = resolveComponent // разрешение компонентов по имени
+  const _key = checkKey // проверка клавиши для модификаторов @keyup.enter и т.п.
 
   // Функция-фабрика создаёт render со всеми помощниками в области видимости.
   // with(ctx) внутри позволяет писать в шаблоне count вместо ctx.count.
@@ -50,9 +51,33 @@ function createRenderFunction(code) {
     '_s',
     '_l',
     '_c',
+    '_key',
     `return function render(ctx){ with(ctx){ return ${code} } }`,
   )
-  return factory(h, Fragment, _s, _l, _c)
+  return factory(h, Fragment, _s, _l, _c, _key)
+}
+
+// Соответствие модификатора клавиши значению event.key.
+const KEY_MAP = {
+  enter: 'Enter',
+  tab: 'Tab',
+  esc: 'Escape',
+  escape: 'Escape',
+  space: ' ',
+  up: 'ArrowUp',
+  down: 'ArrowDown',
+  left: 'ArrowLeft',
+  right: 'ArrowRight',
+  delete: ['Delete', 'Backspace'],
+}
+const KEY_MODS = Object.keys(KEY_MAP)
+
+// _key($event, ['enter']) — true, если нажатая клавиша подходит под модификатор.
+function checkKey(event, mods) {
+  return mods.some((m) => {
+    const expected = KEY_MAP[m]
+    return Array.isArray(expected) ? expected.includes(event.key) : event.key === expected
+  })
 }
 
 // _l: отрисовать список для v-for. Поддерживает массивы, числа (1..n) и объекты.
@@ -116,6 +141,9 @@ function genElement(node) {
 
 // Сгенерировать h('tag', props, children) без учёта v-for/v-if.
 function genElementWithoutStructural(node, directives) {
+  // v-model раскрывается в связку :value + @input (или :checked + @change).
+  if (directives.model) applyVModel(node, directives)
+
   // Тег с большой буквы или с дефисом (RouterView, router-view) считаем
   // компонентом и разрешаем через _c по имени. Остальное — обычный HTML-тег.
   const tag = isComponentTag(node.tag)
@@ -124,6 +152,38 @@ function genElementWithoutStructural(node, directives) {
   const props = genProps(directives)
   const children = genChildren(node.children)
   return `h(${tag}, ${props}, ${children})`
+}
+
+// v-model — «синтаксический сахар» над привязкой значения и обработчиком ввода.
+// <input v-model="name">  ≡  <input :value="name" @input="name = $event.target.value">
+// Выбираем свойство и событие по типу поля: текст → value/input,
+// чекбокс → checked/change, select → value/change.
+function applyVModel(node, directives) {
+  const exp = directives.model.exp
+  const mods = directives.model.modifiers || []
+
+  // Тип поля: из статического type="..." или из :type.
+  const typeAttr = directives.attrs.find((a) => a.name === 'type')
+  const type = typeAttr ? typeAttr.value : null
+
+  let prop = 'value'
+  let event = 'input'
+  let field = 'value'
+  if (node.tag === 'input' && type === 'checkbox') {
+    prop = 'checked'
+    event = 'change'
+    field = 'checked'
+  } else if (node.tag === 'select') {
+    event = 'change'
+  }
+
+  // Значение из события, с учётом модификаторов .number / .trim.
+  let valueExpr = `$event.target.${field}`
+  if (mods.includes('number')) valueExpr = `Number(${valueExpr})`
+  else if (mods.includes('trim')) valueExpr = `${valueExpr}.trim()`
+
+  directives.binds.push({ arg: prop, exp })
+  directives.ons.push({ event, exp: `${exp} = ${valueExpr}`, modifiers: [] })
 }
 
 function isComponentTag(tag) {
@@ -145,18 +205,37 @@ function genProps(directives) {
   for (const on of directives.ons) {
     // @click="handler" → onClick. Имя события с заглавной буквы.
     const key = 'on' + on.event[0].toUpperCase() + on.event.slice(1)
-    entries.push(`${JSON.stringify(key)}: ${genHandler(on.exp)}`)
+    entries.push(`${JSON.stringify(key)}: ${genHandler(on)}`)
   }
 
   return entries.length ? `{ ${entries.join(', ')} }` : 'null'
 }
 
-// Обработчик события бывает двух видов:
-//   @click="doThing"       — ссылка на метод, используем как есть;
-//   @click="count++"       — инлайн-выражение, оборачиваем в $event => (...).
-function genHandler(exp) {
+// Сгенерировать обработчик события с учётом модификаторов.
+//   @click="doThing"          — ссылка на метод, используем как есть;
+//   @click="count++"          — инлайн-выражение, оборачиваем в $event => (...);
+//   @click.stop.prevent="fn"  — оборачиваем и добавляем guard'ы;
+//   @keyup.enter="fn"         — вызываем только для нужной клавиши.
+function genHandler(on) {
+  const exp = on.exp
+  const mods = on.modifiers || []
   const isMethodPath = /^[A-Za-z_$][\w$.]*$/.test(exp.trim())
-  return isMethodPath ? `(${exp})` : `$event => (${exp})`
+
+  // Без модификаторов — как раньше (короткий код, совместимо).
+  if (mods.length === 0) {
+    return isMethodPath ? `(${exp})` : `$event => (${exp})`
+  }
+
+  // С модификаторами — оборачиваем в стрелочную функцию с проверками.
+  const guards = []
+  const keyMods = mods.filter((m) => KEY_MODS.includes(m))
+  if (keyMods.length) guards.push(`if(!_key($event,${JSON.stringify(keyMods)}))return;`)
+  if (mods.includes('stop')) guards.push('$event.stopPropagation();')
+  if (mods.includes('prevent')) guards.push('$event.preventDefault();')
+  if (mods.includes('self')) guards.push('if($event.target!==$event.currentTarget)return;')
+
+  const call = isMethodPath ? `${exp}($event)` : `(${exp})`
+  return `$event => { ${guards.join('')} ${call} }`
 }
 
 // --- дети с учётом v-if / v-else -------------------------------------------
@@ -207,7 +286,8 @@ function classify(props = []) {
   const result = {
     attrs: [], // статические: class="x"
     binds: [], // :id / v-bind:id
-    ons: [], // @click / v-on:click
+    ons: [], // @click / v-on:click (с модификаторами)
+    model: null, // v-model
     if: null,
     elseif: null,
     else: false,
@@ -218,14 +298,22 @@ function classify(props = []) {
     else if (name === 'v-else-if') result.elseif = value
     else if (name === 'v-else') result.else = true
     else if (name === 'v-for') result.for = value
+    else if (name === 'v-model' || name.startsWith('v-model.'))
+      result.model = { exp: value, modifiers: name.split('.').slice(1) }
     else if (name.startsWith(':')) result.binds.push({ arg: name.slice(1), exp: value })
     else if (name.startsWith('v-bind:'))
       result.binds.push({ arg: name.slice(7), exp: value })
-    else if (name.startsWith('@')) result.ons.push({ event: name.slice(1), exp: value })
-    else if (name.startsWith('v-on:')) result.ons.push({ event: name.slice(5), exp: value })
+    else if (name.startsWith('@')) result.ons.push(parseEvent(name.slice(1), value))
+    else if (name.startsWith('v-on:')) result.ons.push(parseEvent(name.slice(5), value))
     else result.attrs.push({ name, value })
   }
   return result
+}
+
+// '@click.stop.prevent' → { event: 'click', exp, modifiers: ['stop','prevent'] }
+function parseEvent(raw, value) {
+  const [event, ...modifiers] = raw.split('.')
+  return { event, exp: value, modifiers }
 }
 
 // Разобрать выражение v-for: "item in list" или "(item, index) in list".

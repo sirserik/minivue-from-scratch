@@ -7,10 +7,12 @@
 //  именно применить каждое из них к DOM.
 // ============================================================================
 
+import { normalizeClass, normalizeStyle, camelToKebab } from '../shared.js'
+
 export function patchProp(el, key, prevValue, nextValue) {
   if (key === 'class') {
-    // class удобнее ставить через .className целиком.
-    el.className = nextValue == null ? '' : nextValue
+    // class может прийти строкой, массивом или объектом — приводим к строке.
+    el.className = normalizeClass(nextValue)
   } else if (key === 'style') {
     patchStyle(el, prevValue, nextValue)
   } else if (isEventKey(key)) {
@@ -39,30 +41,29 @@ function patchEvent(el, key, prevValue, nextValue) {
 }
 
 function patchStyle(el, prev, next) {
-  next = next || {}
-  // Ставим/обновляем новые свойства стиля.
-  for (const name in next) {
-    el.style[name] = next[name]
+  const nextObj = normalizeStyle(next)
+  const prevObj = normalizeStyle(prev)
+  // Ставим/обновляем новые свойства стиля (kebab-case через setProperty).
+  for (const name in nextObj) {
+    el.style.setProperty(camelToKebab(name), nextObj[name])
   }
   // Убираем те, что были, но исчезли.
-  if (prev) {
-    for (const name in prev) {
-      if (next[name] == null) el.style[name] = ''
-    }
+  for (const name in prevObj) {
+    if (nextObj[name] == null) el.style.removeProperty(camelToKebab(name))
   }
 }
 
 function patchAttr(el, key, nextValue) {
+  // Для value/checked у полей ввода пишем в СВОЙСТВО напрямую, иначе браузер не
+  // обновит уже отрисованное поле (атрибут задаёт лишь начальное значение).
+  if ((key === 'value' || key === 'checked') && key in el) {
+    el[key] = key === 'checked' ? !!nextValue : nextValue == null ? '' : nextValue
+    return
+  }
   if (nextValue == null || nextValue === false) {
     // null / undefined / false — атрибут надо убрать.
     el.removeAttribute(key)
   } else {
-    // Для value/checked у полей ввода корректнее писать в свойство напрямую,
-    // иначе браузер не обновит уже отрисованное поле.
-    if (key === 'value' && 'value' in el) {
-      el.value = nextValue
-    } else {
-      el.setAttribute(key, nextValue === true ? '' : nextValue)
-    }
+    el.setAttribute(key, nextValue === true ? '' : nextValue)
   }
 }
