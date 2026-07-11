@@ -144,17 +144,20 @@ export function createRenderer(options) {
       hostPatchProp(el, key, null, props[key])
     }
 
-    // 3. Монтируем содержимое: строку — как текст, массив — по одному ребёнку.
+    // 3. Вставляем элемент в родителя СНАЧАЛА — чтобы к моменту монтирования
+    //    детей и вызова mounted-хуков директив узел уже был подключён к документу.
+    //    Иначе el.focus() и подобное в директивах выполнялись бы на «оторванном»
+    //    от страницы узле и не срабатывали.
+    hostInsert(el, container, anchor)
+
+    // 4. Монтируем содержимое: строку — как текст, массив — по одному ребёнку.
     if (typeof children === 'string' || typeof children === 'number') {
       hostSetElementText(el, String(children))
     } else if (Array.isArray(children)) {
       mountChildren(children, el, null)
     }
 
-    // 4. Вставляем готовый элемент в родителя (перед якорем или в конец).
-    hostInsert(el, container, anchor)
-
-    // 5. Кастомные директивы: элемент появился в DOM — зовём их mounted-хук.
+    // 5. Кастомные директивы: элемент уже в DOM — зовём их mounted-хук.
     invokeDirectives(vnode, 'mounted')
   }
 

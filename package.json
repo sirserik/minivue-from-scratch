@@ -6,7 +6,8 @@
   "private": true,
   "scripts": {
     "test": "node --test test/*.test.mjs",
-    "serve": "node scripts/serve.js"
+    "serve": "node scripts/serve.js",
+    "e2e": "node examples/kanban/e2e.mjs"
   },
   "author": "Серик Мурадов <sirserik@gmail.com>",
   "license": "MIT"
