@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>MiniVue · Слой 1: Реактивность</title>
+    <style>
+      body {
+        font-family: -apple-system, system-ui, sans-serif;
+        max-width: 720px;
+        margin: 40px auto;
+        padding: 0 20px;
+        color: #1c1e21;
+        line-height: 1.6;
+      }
+      h1 { font-size: 22px; }
+      .card {
+        border: 1px solid #e3e6ea;
+        border-radius: 12px;
+        padding: 20px;
+        margin: 16px 0;
+        background: #fbfcfd;
+      }
+      button {
+        font-size: 15px;
+        padding: 8px 16px;
+        border: 1px solid #cdd2d8;
+        border-radius: 8px;
+        background: #fff;
+        cursor: pointer;
+      }
+      button:hover { background: #f0f2f5; }
+      .val { font-weight: 700; color: #2563eb; }
+      code {
+        background: #eef1f4;
+        padding: 1px 6px;
+        border-radius: 4px;
+        font-family: Menlo, monospace;
+        font-size: 13px;
+      }
+      .muted { color: #6b7280; font-size: 14px; }
+    </style>
+  </head>
+  <body>
+    <h1>MiniVue · Слой 1: Реактивность в живую</h1>
+    <p class="muted">
+      Здесь нет ни настоящего Vue, ни сборщика. Только наши файлы из
+      <code>packages/reactivity</code>, импортированные напрямую в браузер.
+      Откройте консоль (⌥⌘I) — там видно, когда срабатывают эффекты.
+    </p>
+
+    <!-- Демо 1: ref + effect -->
+    <div class="card">
+      <p>Счётчик (<code>ref</code>): <span class="val" id="count">0</span></p>
+      <p>Удвоенное (<code>computed</code>): <span class="val" id="doubled">0</span></p>
+      <p>Чётность (<code>computed</code>): <span class="val" id="parity">чётное</span></p>
+      <button id="inc">+1</button>
+      <button id="dec">−1</button>
+      <p class="muted" id="log">Эффект отработал раз: 0</p>
+    </div>
+
+    <!-- Демо 2: reactive-объект -->
+    <div class="card">
+      <p>Корзина (<code>reactive</code>). Товаров: <span class="val" id="cartCount">0</span>,
+        сумма: <span class="val" id="cartTotal">0</span> ₸</p>
+      <button id="add">Добавить товар за 500 ₸</button>
+    </div>
+
+    <script type="module">
+      // Прямой импорт нашего кода — как есть, без транспиляции.
+      import { ref, reactive, computed, effect } from '../packages/reactivity/index.js'
+
+      // --- Демо 1 ---------------------------------------------------------
+      const count = ref(0)
+      const doubled = computed(() => count.value * 2)
+      const parity = computed(() => (count.value % 2 === 0 ? 'чётное' : 'нечётное'))
+
+      let runs = 0
+      // Один эффект, который читает count/doubled/parity и обновляет DOM.
+      // Он сам подпишется на всё, что прочитал, и будет перезапускаться при
+      // любом изменении count.
+      effect(() => {
+        runs++
+        document.getElementById('count').textContent = count.value
+        document.getElementById('doubled').textContent = doubled.value
+        document.getElementById('parity').textContent = parity.value
+        document.getElementById('log').textContent = 'Эффект отработал раз: ' + runs
+        console.log('[effect] перерисовка, count =', count.value)
+      })
+
+      document.getElementById('inc').onclick = () => count.value++
+      document.getElementById('dec').onclick = () => count.value--
+
+      // --- Демо 2 ---------------------------------------------------------
+      const cart = reactive({ items: [] })
+      const total = computed(() => cart.items.reduce((s, p) => s + p.price, 0))
+
+      effect(() => {
+        document.getElementById('cartCount').textContent = cart.items.length
+        document.getElementById('cartTotal').textContent = total.value
+      })
+
+      document.getElementById('add').onclick = () => {
+        // Меняем вложенный массив реактивного объекта — эффект сам обновит UI.
+        cart.items.push({ price: 500 })
+      }
+    </script>
+  </body>
+</html>

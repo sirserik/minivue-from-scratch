@@ -1,0 +1,9 @@
+node_modules/
+.DS_Store
+*.log
+
+# Промежуточные файлы сборки PDF (сам PDF коммитим)
+book/*.aux
+book/*.toc
+book/*.out
+book/*.tex

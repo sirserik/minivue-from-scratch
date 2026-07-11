@@ -1,0 +1,13 @@
+{
+  "name": "minivue-from-scratch",
+  "version": "0.1.0",
+  "description": "Учебная реализация Vue 3 с нуля: реактивность, virtual DOM, компилятор, компоненты, роутер, стор и SSR — на чистом ESM без сборки.",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "test": "node --test test/",
+    "serve": "node scripts/serve.js"
+  },
+  "author": "Серик Мурадов <sirserik@gmail.com>",
+  "license": "MIT"
+}

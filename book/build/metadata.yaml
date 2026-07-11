@@ -1,0 +1,87 @@
+---
+title: "MiniVue — Vue 3 своими руками"
+subtitle: "Строим фреймворк с нуля: реактивность, virtual DOM, компилятор, компоненты, роутер, стор и SSR"
+author: "Серик Мурадов"
+lang: ru
+documentclass: book
+classoption:
+  - oneside
+  - 11pt
+  - openany
+geometry:
+  - margin=2.3cm
+  - top=2.5cm
+  - bottom=2.5cm
+mainfont: "PT Serif"
+sansfont: "Helvetica Neue"
+monofont: "Menlo"
+monofontoptions:
+  - Scale=0.82
+fontsize: 11pt
+linestretch: 1.25
+colorlinks: true
+linkcolor: "RoyalBlue"
+urlcolor: "RoyalBlue"
+toccolor: "black"
+toc: true
+toc-depth: 2
+numbersections: false
+highlight-style: tango
+header-includes: |
+  \usepackage{fancyhdr}
+  \pagestyle{fancy}
+  \fancyhf{}
+  \fancyhead[L]{\small\nouppercase\leftmark}
+  \fancyhead[R]{\small\thepage}
+  \renewcommand{\headrulewidth}{0.3pt}
+  \usepackage{xcolor}
+  \definecolor{quotecol}{HTML}{4A4A4A}
+  \usepackage{microtype}
+  \raggedbottom
+  \clubpenalty=10000
+  \widowpenalty=10000
+  \renewcommand\chaptermark[1]{\markboth{#1}{}}
+  \usepackage{tocloft}
+  \setlength{\cftchapnumwidth}{2.4em}
+  \setlength{\cftsecnumwidth}{3.2em}
+  \setlength{\cftsubsecnumwidth}{4em}
+  \setlength{\cftsubsubsecnumwidth}{4.8em}
+  \let\oldchapter\chapter
+  \renewcommand{\chapter}{\clearpage\oldchapter}
+  \usepackage{enumitem}
+  \setlistdepth{9}
+  \renewlist{itemize}{itemize}{9}
+  \setlist[itemize,1]{label=$\bullet$}
+  \setlist[itemize,2]{label=$\circ$}
+  \setlist[itemize,3]{label=$\ast$}
+  \setlist[itemize,4]{label=$\diamond$}
+  \setlist[itemize,5]{label=$\cdot$}
+  \setlist[itemize,6]{label=$\bullet$}
+  \setlist[itemize,7]{label=$\circ$}
+  \setlist[itemize,8]{label=$\ast$}
+  \setlist[itemize,9]{label=$\diamond$}
+  \renewlist{enumerate}{enumerate}{9}
+  \setlist[enumerate,1]{label=\arabic*.}
+  \setlist[enumerate,2]{label=\alph*.}
+  \setlist[enumerate,3]{label=\roman*.}
+  \setlist[enumerate,4]{label=\arabic*.}
+  \setlist[enumerate,5]{label=\alph*.}
+  \usepackage{newunicodechar}
+  \newfontfamily\symbolfont{Menlo}
+  \newunicodechar{→}{{\symbolfont →}}
+  \newunicodechar{←}{{\symbolfont ←}}
+  \newunicodechar{↑}{{\symbolfont ↑}}
+  \newunicodechar{↓}{{\symbolfont ↓}}
+  \newunicodechar{⇒}{{\symbolfont ⇒}}
+  \newunicodechar{⇐}{{\symbolfont ⇐}}
+  \newunicodechar{≈}{{\symbolfont ≈}}
+  \newunicodechar{≠}{{\symbolfont ≠}}
+  \newunicodechar{≤}{{\symbolfont ≤}}
+  \newunicodechar{≥}{{\symbolfont ≥}}
+  \newunicodechar{·}{{\symbolfont ·}}
+  \newunicodechar{…}{{\symbolfont …}}
+  \newunicodechar{✓}{{\symbolfont ✓}}
+  \newunicodechar{✗}{{\symbolfont ✗}}
+  \newunicodechar{●}{{\symbolfont ●}}
+  \newunicodechar{○}{{\symbolfont ○}}
+---
