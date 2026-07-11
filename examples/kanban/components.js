@@ -5,6 +5,7 @@
 import {
   ref,
   shallowRef,
+  computed,
   provide,
   defineAsyncComponent,
 } from '../../packages/runtime-core/index.js'
@@ -90,6 +91,11 @@ export const BoardView = {
     const filtered = (colId) =>
       board.byColumn(colId).filter((c) => c.title.toLowerCase().includes(search.value.toLowerCase()))
 
+    // Сколько всего карточек подходит под текущий поиск (для подсказки-пустышки).
+    const matchCount = computed(() =>
+      board.active.filter((c) => c.title.toLowerCase().includes(search.value.toLowerCase())).length,
+    )
+
     const add = () => {
       const t = draft.value.trim()
       if (!t) return
@@ -97,18 +103,25 @@ export const BoardView = {
       draft.value = ''
     }
 
-    return { board, search, draft, draftCol, selected, filtered, add }
+    return { board, search, draft, draftCol, selected, filtered, matchCount, add }
   },
   template: `
     <div>
       <div class="controls card">
-        <input v-model="search" placeholder="Поиск карточек…" />
+        <input class="search" v-model="search" placeholder="🔎 Поиск карточек…" />
+        <button v-if="search" @click="search = ''">✕</button>
+        <span class="sep"></span>
         <input v-model="draft" @keyup.enter="add" placeholder="Новая карточка…" />
         <select v-model="draftCol">
           <option v-for="c in board.columns" :key="c.id" :value="c.id">{{ c.name }}</option>
         </select>
         <button class="primary" @click="add">Добавить</button>
       </div>
+
+      <p v-if="search && matchCount === 0" class="muted">
+        По запросу «{{ search }}» ничего не найдено — карточки скрыты фильтром.
+        <button @click="search = ''">Показать все</button>
+      </p>
 
       <div class="board">
         <div class="column" v-for="col in board.columns" :key="col.id">

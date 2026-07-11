@@ -106,6 +106,16 @@ try {
     'KeepAlive сохранил введённый поиск',
   )
 
+  console.log('8. Поиск без совпадений: подсказка + сброс')
+  await page.getByPlaceholder('Поиск карточек…').fill('щщщнеттакого')
+  await page.waitForTimeout(50)
+  assert((await page.locator('.kcard').count()) === 0, 'карточки скрыты фильтром')
+  assert((await page.getByText('ничего не найдено').count()) > 0, 'показана подсказка о пустом результате')
+  await page.getByText('Показать все').click()
+  await page.waitForTimeout(50)
+  assert((await page.locator('.kcard').count()) > 0, '«Показать все» вернул карточки')
+  assert((await page.getByPlaceholder('Поиск карточек…').inputValue()) === '', 'поиск очищен')
+
   if (errors.length) {
     console.log('\nОшибки в браузере:')
     errors.forEach((e) => console.log('  ✗ ' + e))
