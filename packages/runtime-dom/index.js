@@ -1,24 +1,53 @@
 // ============================================================================
 //  runtime-dom — «сборка» рендерера под браузер.
 //  Соединяем платформо-независимый renderer из runtime-core с браузерными
-//  операциями nodeOps и patchProp. Наружу отдаём готовые render() и h().
+//  операциями nodeOps и patchProp, подключаем систему компонентов и отдаём
+//  наружу готовые render(), createApp() и весь публичный API.
 // ============================================================================
 
 import { createRenderer } from '../runtime-core/renderer.js'
+import { createComponentSystem } from '../runtime-core/component.js'
+import { createAppAPI } from '../runtime-core/apiCreateApp.js'
 import { nodeOps } from './nodeOps.js'
 import { patchProp } from './patchProp.js'
 
-// Собираем набор операций: узлы + один особый ключ patchProp.
+// Набор операций: узлы + patchProp.
 const rendererOptions = { ...nodeOps, patchProp }
 
-// Единственный экземпляр рендерера для браузера.
+// Экземпляр рендерера для браузера.
 const renderer = createRenderer(rendererOptions)
 
-// render(vnode, container) — показать VNode внутри реального элемента.
+// Подключаем поддержку компонентов: рендерер отдаёт свои внутренности, система
+// компонентов возвращает обработчики, которые рендерер вставляет в patch.
+renderer.__installComponents((internals) => createComponentSystem(internals))
+
+// Публичные точки входа.
 export const render = renderer.render
+export const createApp = createAppAPI(renderer.render)
 
-// Отдаём и «внутренности» — они понадобятся слою компонентов (createApp).
-export const __renderer = renderer
-
-// Реэкспорт удобств из ядра, чтобы пользователю хватало одного импорта.
-export { h, createVNode, Text, Fragment } from '../runtime-core/vnode.js'
+// Реэкспорт всего пользовательского API из ядра — один импорт на всё.
+export {
+  h,
+  createVNode,
+  Text,
+  Fragment,
+  nextTick,
+  getCurrentInstance,
+  onBeforeMount,
+  onMounted,
+  onBeforeUpdate,
+  onUpdated,
+  onBeforeUnmount,
+  onUnmounted,
+  provide,
+  inject,
+  ref,
+  reactive,
+  computed,
+  watch,
+  effect,
+  isRef,
+  unref,
+  toRef,
+  toRefs,
+} from '../runtime-core/index.js'

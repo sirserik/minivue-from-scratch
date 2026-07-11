@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>MiniVue · Слой 3: Компоненты</title>
+    <style>
+      body { font-family: -apple-system, system-ui, sans-serif; max-width: 640px; margin: 40px auto; padding: 0 20px; line-height: 1.6; }
+      h1 { font-size: 22px; }
+      .muted { color: #6b7280; font-size: 14px; }
+      .card { border: 1px solid #e3e6ea; border-radius: 12px; padding: 16px 20px; margin: 14px 0; background: #fbfcfd; }
+      input { font-size: 15px; padding: 8px 10px; border: 1px solid #cdd2d8; border-radius: 8px; width: 60%; }
+      button { font-size: 14px; padding: 6px 12px; border: 1px solid #cdd2d8; border-radius: 8px; background: #fff; cursor: pointer; }
+      button:hover { background: #f0f2f5; }
+      .todo { display: flex; align-items: center; gap: 10px; padding: 6px 0; }
+      .done { text-decoration: line-through; color: #9ca3af; }
+      .grow { flex: 1; }
+      code { background: #eef1f4; padding: 1px 6px; border-radius: 4px; font-family: Menlo, monospace; font-size: 13px; }
+    </style>
+  </head>
+  <body>
+    <h1>MiniVue · Слой 3: Компоненты</h1>
+    <p class="muted">
+      Настоящее приложение на <code>createApp</code>. Родитель <code>TodoApp</code>
+      держит состояние, дочерний <code>TodoItem</code> получает задачу через
+      <code>props</code> и сообщает наверх через <code>emit</code>. Шаблонов ещё
+      нет — разметку описываем функцией <code>render</code> и <code>h()</code>
+      (шаблоны появятся в слое 4).
+    </p>
+    <div id="app"></div>
+
+    <script type="module">
+      import { createApp, h, ref, computed } from '../packages/runtime-dom/index.js'
+
+      // Дочерний компонент: одна задача. Принимает props.todo, шлёт события.
+      const TodoItem = {
+        props: ['todo'],
+        setup(props, { emit }) {
+          return {
+            toggle: () => emit('toggle', props.todo.id),
+            remove: () => emit('remove', props.todo.id),
+          }
+        },
+        render(ctx) {
+          const t = ctx.todo
+          return h('div', { class: 'todo' }, [
+            h('input', { type: 'checkbox', checked: t.done, onChange: ctx.toggle }),
+            h('span', { class: t.done ? 'done grow' : 'grow' }, t.text),
+            h('button', { onClick: ctx.remove }, '✕'),
+          ])
+        },
+      }
+
+      // Корневой компонент.
+      const TodoApp = {
+        setup() {
+          let nextId = 3
+          const draft = ref('')
+          const todos = ref([
+            { id: 1, text: 'Понять реактивность', done: true },
+            { id: 2, text: 'Написать рендерер', done: false },
+          ])
+          const left = computed(() => todos.value.filter((t) => !t.done).length)
+
+          const add = () => {
+            const text = draft.value.trim()
+            if (!text) return
+            todos.value = [...todos.value, { id: nextId++, text, done: false }]
+            draft.value = ''
+          }
+          const toggle = (id) => {
+            todos.value = todos.value.map((t) =>
+              t.id === id ? { ...t, done: !t.done } : t,
+            )
+          }
+          const remove = (id) => {
+            todos.value = todos.value.filter((t) => t.id !== id)
+          }
+          return { draft, todos, left, add, toggle, remove }
+        },
+        render(ctx) {
+          return h('div', { class: 'card' }, [
+            h('div', [
+              h('input', {
+                value: ctx.draft,
+                placeholder: 'Новая задача…',
+                onInput: (e) => (ctx.draft = e.target.value),
+                onKeydown: (e) => e.key === 'Enter' && ctx.add(),
+              }),
+              ' ',
+              h('button', { onClick: ctx.add }, 'Добавить'),
+            ]),
+            // Список дочерних компонентов с ключами — работает keyed-diff слоя 2.
+            h(
+              'div',
+              ctx.todos.map((t) =>
+                h(TodoItem, {
+                  key: t.id,
+                  todo: t,
+                  onToggle: ctx.toggle,
+                  onRemove: ctx.remove,
+                }),
+              ),
+            ),
+            h('p', { class: 'muted' }, `Осталось невыполненных: ${ctx.left}`),
+          ])
+        },
+      }
+
+      createApp(TodoApp).mount('#app')
+    </script>
+  </body>
+</html>
