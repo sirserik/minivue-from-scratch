@@ -31,8 +31,14 @@ export const useBoard = defineStore('board', () => {
     const saved = localStorage.getItem(STORAGE_KEY)
     if (saved) {
       try {
-        initial = JSON.parse(saved)
-        maxId = initial.reduce((m, c) => Math.max(m, c.id), 0)
+        const parsed = JSON.parse(saved)
+        // Принимаем ТОЛЬКО непустой массив карточек. Иначе (пустой массив, не
+        // массив, битый JSON) откатываемся на начальные данные — иначе
+        // items.value.filter(...) в computed упал бы и обнулил всю страницу.
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          initial = parsed
+          maxId = initial.reduce((m, c) => Math.max(m, Number(c.id) || 0), 0)
+        }
       } catch {
         /* битые данные — оставим seed */
       }
