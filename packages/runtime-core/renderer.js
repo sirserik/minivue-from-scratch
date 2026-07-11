@@ -337,23 +337,81 @@ export function createRenderer(options) {
     container._vnode = vnode
   }
 
-  // -- Заглушки для компонентов. Их тело появится в слое 3 (мы отредактируем
-  //    этот файл). Пока рендерер полностью работоспособен для элементов,
-  //    текста и фрагментов.
+  // -------------------------------------------------------------------------
+  //  ГИДРАТАЦИЯ (слой 7). Сервер уже прислал готовый HTML. На клиенте не нужно
+  //  создавать элементы заново — надо «усыновить» существующие: связать наши
+  //  VNode с реальными узлами (vnode.el = узел) и навесить обработчики событий
+  //  (их в HTML нет). После этого приложение живёт как обычно — правки идут через
+  //  patch по уже адаптированному дереву.
+  // -------------------------------------------------------------------------
+  function hydrate(vnode, container) {
+    hydrateNode(container.firstChild, vnode)
+    container._vnode = vnode
+  }
+
+  // Гидрировать один узел: сопоставить DOM-узел node и vnode. Возвращает
+  // следующий DOM-узел (правого соседа) — чтобы идти по детям по очереди.
+  function hydrateNode(node, vnode) {
+    vnode = normalizeVNode(vnode)
+    const { type } = vnode
+
+    if (type === Text) {
+      vnode.el = node
+      return node ? node.nextSibling : null
+    }
+
+    if (type === Fragment) {
+      let cur = node
+      for (const child of vnode.children) cur = hydrateNode(cur, child)
+      return cur
+    }
+
+    if (typeof type === 'string') {
+      // Элемент: связываем узел и навешиваем props. Статические атрибуты в HTML
+      // уже есть (setAttribute идемпотентен), а вот события добавляются здесь.
+      vnode.el = node
+      for (const key in vnode.props) {
+        if (key !== 'key') hostPatchProp(node, key, null, vnode.props[key])
+      }
+      // Гидрируем детей по childNodes.
+      if (Array.isArray(vnode.children)) {
+        let cur = node.firstChild
+        for (const child of vnode.children) cur = hydrateNode(cur, child)
+      }
+      return node.nextSibling
+    }
+
+    if (typeof type === 'object' || typeof type === 'function') {
+      // Компонент: отдаём его системе компонентов, она смонтируется «поверх»
+      // существующего узла и заведёт реактивный эффект для будущих обновлений.
+      hydrateComponentImpl(vnode, node)
+      return node ? node.nextSibling : null
+    }
+
+    return node ? node.nextSibling : null
+  }
+
+  // -- Заглушки для компонентов. Их тело подставляет слой 3 через
+  //    __installComponents, а гидратацию компонентов — слой 7.
   let processComponent = () => {
     throw new Error('Компоненты появятся в слое 3 (runtime-core/component.js)')
   }
   let unmountComponent = (vnode) => hostRemove(vnode.el)
-
-  // Позволяем слою компонентов «вставить» свою реализацию, не переписывая
-  // весь рендерер. Возвращаем внутренние функции, которые компонентам нужны.
-  function __installComponents(install) {
-    const api = install({ patch, unmount, render, options, mountChildren })
-    processComponent = api.processComponent
-    unmountComponent = api.unmountComponent
+  let hydrateComponentImpl = () => {
+    throw new Error('Гидратация компонентов не подключена')
   }
 
-  return { render, createRenderer, patch, __installComponents }
+  // Позволяем слою компонентов «вставить» свою реализацию, не переписывая
+  // весь рендерер. Отдаём внутренние функции, которые компонентам нужны
+  // (включая hydrateNode — она нужна для гидратации поддерева компонента).
+  function __installComponents(install) {
+    const api = install({ patch, unmount, render, options, mountChildren, hydrateNode })
+    processComponent = api.processComponent
+    unmountComponent = api.unmountComponent
+    if (api.hydrateComponent) hydrateComponentImpl = api.hydrateComponent
+  }
+
+  return { render, hydrate, createRenderer, patch, __installComponents }
 }
 
 // Два VNode «те же самые» (можно обновлять один в другой), если совпали и тип,

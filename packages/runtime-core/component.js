@@ -74,7 +74,7 @@ export function resolveComponent(name) {
 //  обрабатывать и как размонтировать компонент.
 // ---------------------------------------------------------------------------
 export function createComponentSystem(internals) {
-  const { patch, unmount } = internals
+  const { patch, unmount, hydrateNode } = internals
 
   function processComponent(n1, n2, container, anchor) {
     if (n1 == null) {
@@ -98,6 +98,18 @@ export function createComponentSystem(internals) {
     setupRenderEffect(instance, container, anchor)
   }
 
+  // Гидратация компонента (слой 7): монтируемся «поверх» готового DOM-узла.
+  function hydrateComponent(vnode, domNode) {
+    const instance = (vnode.component = createComponentInstance(
+      vnode,
+      currentRenderingInstance,
+    ))
+    setupComponent(instance)
+    // container для будущих правок — родитель существующего узла; четвёртым
+    // аргументом передаём сам узел как «точку гидратации» первого рендера.
+    setupRenderEffect(instance, domNode.parentNode, null, domNode)
+  }
+
   function updateComponent(n1, n2) {
     // Родитель перерисовался и передал компоненту новый vnode (возможно, с
     // новыми props). Переиспользуем существующий инстанс.
@@ -108,9 +120,9 @@ export function createComponentSystem(internals) {
     queueJob(instance.update)
   }
 
-  function setupRenderEffect(instance, container, anchor) {
-    // Функция одного «прохода» рендера компонента. При первом запуске монтирует,
-    // при последующих — обновляет.
+  function setupRenderEffect(instance, container, anchor, hydrationNode = null) {
+    // Функция одного «прохода» рендера компонента. При первом запуске монтирует
+    // (или гидрирует, если задан hydrationNode), при последующих — обновляет.
     const componentUpdateFn = () => {
       // На время рендера и патча поддерева объявляем себя текущим — чтобы
       // дочерние компоненты взяли нас родителем.
@@ -120,7 +132,12 @@ export function createComponentSystem(internals) {
         if (!instance.isMounted) {
           invokeHooks(instance.bm) // onBeforeMount
           const subTree = (instance.subTree = renderComponentRoot(instance))
-          patch(null, subTree, container, anchor)
+          if (hydrationNode) {
+            // Гидратация: «усыновляем» готовый DOM вместо создания нового.
+            hydrateNode(hydrationNode, subTree)
+          } else {
+            patch(null, subTree, container, anchor)
+          }
           instance.vnode.el = subTree.el // корневой узел компонента
           instance.isMounted = true
           invokeHooks(instance.m) // onMounted
@@ -170,7 +187,25 @@ export function createComponentSystem(internals) {
     invokeHooks(instance.um) // onUnmounted
   }
 
-  return { processComponent, unmountComponent }
+  return { processComponent, unmountComponent, hydrateComponent }
+}
+
+// ---------------------------------------------------------------------------
+//  createSSRComponent — отрисовать компонент на сервере (слой 7), без DOM.
+//  Создаёт инстанс, выполняет setup и возвращает поддерево VNode. Реактивный
+//  эффект не нужен: на сервере ничего не «живёт», нам важен разовый снимок.
+// ---------------------------------------------------------------------------
+export function createSSRComponent(vnode, parent) {
+  const instance = createComponentInstance(vnode, parent)
+  setupComponent(instance)
+  const prev = currentRenderingInstance
+  currentRenderingInstance = instance // чтобы resolveComponent видел контекст
+  try {
+    const subTree = renderComponentRoot(instance)
+    return { instance, subTree }
+  } finally {
+    currentRenderingInstance = prev
+  }
 }
 
 // ---------------------------------------------------------------------------

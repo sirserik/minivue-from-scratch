@@ -18,13 +18,16 @@ TypeScript. Всё, что делает браузер, видно как ест
 
 | Слой | Пакет | Что внутри | Статус |
 |------|-------|-----------|--------|
-| 1. Реактивность | `packages/reactivity` | `ref`, `reactive`, `computed`, `watch`, `effect` | ✅ готово |
-| 2. Virtual DOM | `packages/runtime-core`, `runtime-dom` | `h`, `createRenderer`, diff | ⏳ |
-| 3. Компоненты | `packages/runtime-core` | `setup`, props/emit, слоты, lifecycle, `createApp` | ⏳ |
-| 4. Компилятор | `packages/compiler` | `template` → render-функция | ⏳ |
-| 5. Router | `packages/router` | `createRouter`, `RouterView`, `RouterLink` | ⏳ |
-| 6. Store | `packages/store` | `createPinia`, `defineStore` | ⏳ |
-| 7. SSR | `packages/server-renderer` | `renderToString`, гидратация | ⏳ |
+| 1. Реактивность | `packages/reactivity` | `ref`, `reactive`, `computed`, `watch`, `effect` | ✅ |
+| 2. Virtual DOM | `packages/runtime-core`, `runtime-dom` | `h`, `createRenderer`, keyed-diff (LIS) | ✅ |
+| 3. Компоненты | `packages/runtime-core` | `setup`, props/emit, слоты, lifecycle, `createApp` | ✅ |
+| 4. Компилятор | `packages/compiler` | `template` → render-функция | ✅ |
+| 5. Router | `packages/router` | `createRouter`, `RouterView`, `RouterLink` | ✅ |
+| 6. Store | `packages/store` | `createPinia`, `defineStore` | ✅ |
+| 7. SSR | `packages/server-renderer` | `renderToString`, гидратация | ✅ |
+
+Все 7 слоёв готовы: **64 теста** (`npm test`), 7 браузерных демо, SSR-сервер,
+учебник из 8 глав.
 
 ## Как запустить
 
@@ -32,9 +35,13 @@ TypeScript. Всё, что делает браузер, видно как ест
 # Тесты (встроенный тест-раннер Node, зависимостей нет)
 npm test
 
-# Живые демо в браузере
+# Живые демо в браузере (слои 1–6)
 npm run serve
 # затем открыть http://localhost:5173/playground/
+
+# SSR-пример (слой 7): рендер на сервере + гидратация
+node playground/07-ssr/server.js
+# затем открыть http://localhost:5174/
 ```
 
 Требуется только Node.js 18+ (для тест-раннера и dev-сервера). Сам фреймворк

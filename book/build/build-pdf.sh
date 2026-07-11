@@ -21,6 +21,7 @@ else
     "$ROOT/book/chapters/04-compiler.md"
     "$ROOT/book/chapters/05-router.md"
     "$ROOT/book/chapters/06-store.md"
+    "$ROOT/book/chapters/07-ssr.md"
   )
 fi
 

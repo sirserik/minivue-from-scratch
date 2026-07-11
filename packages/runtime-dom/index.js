@@ -23,6 +23,7 @@ renderer.__installComponents((internals) => createComponentSystem(internals))
 
 // Публичные точки входа.
 export const render = renderer.render
+export const hydrate = renderer.hydrate // «оживление» серверного HTML (слой 7)
 export const createApp = createAppAPI(renderer.render)
 
 // Реэкспорт всего пользовательского API из ядра — один импорт на всё.
