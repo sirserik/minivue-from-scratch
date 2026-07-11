@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>MiniVue · Капстоун: заметки</title>
+    <style>
+      body { font-family: -apple-system, system-ui, sans-serif; max-width: 680px; margin: 40px auto; padding: 0 20px; line-height: 1.6; color: #1c1e21; }
+      h1 { font-size: 22px; }
+      .muted { color: #6b7280; font-size: 14px; }
+      nav { display: flex; gap: 14px; padding: 12px 0; border-bottom: 1px solid #e3e6ea; margin-bottom: 16px; }
+      nav a { color: #2563eb; text-decoration: none; }
+      nav a.active { font-weight: 700; }
+      .card { border: 1px solid #e3e6ea; border-radius: 12px; padding: 16px 20px; margin: 12px 0; background: #fbfcfd; }
+      input, textarea { font-size: 15px; padding: 8px 10px; border: 1px solid #cdd2d8; border-radius: 8px; width: 100%; box-sizing: border-box; font-family: inherit; }
+      button { font-size: 14px; padding: 7px 14px; border: 1px solid #cdd2d8; border-radius: 8px; background: #fff; cursor: pointer; }
+      button.primary { background: #111827; color: #fff; border-color: #111827; }
+      button.danger { color: #b91c1c; border-color: #fca5a5; }
+      .note-row { display: flex; justify-content: space-between; align-items: center; }
+      .backdrop { position: fixed; inset: 0; background: rgba(0,0,0,.4); display: flex; align-items: center; justify-content: center; }
+      .modal { background: #fff; padding: 24px; border-radius: 12px; min-width: 300px; }
+      .pill { background: #eef2ff; color: #3730a3; border-radius: 999px; padding: 1px 10px; font-size: 13px; }
+    </style>
+  </head>
+  <body>
+    <h1>MiniVue — итоговое приложение «Заметки»</h1>
+    <p class="muted">
+      Здесь работает всё сразу: роутер (список/деталь/о программе), стор (Pinia-аналог
+      с $subscribe), формы с v-model, Teleport для модалки удаления. Всё — на нашем
+      фреймворке, собранном с нуля.
+    </p>
+    <div id="app"></div>
+    <div id="modals"></div>
+
+    <script type="module">
+      import { createApp, ref, computed } from '../packages/minivue.js'
+      import { createPinia, defineStore, storeToRefs } from '../packages/store/index.js'
+      import {
+        createRouter,
+        createWebHashHistory,
+        useRoute,
+        useRouter,
+      } from '../packages/router/index.js'
+
+      // --- Стор заметок (setup-стиль) -------------------------------------
+      const useNotes = defineStore('notes', () => {
+        let nextId = 3
+        const items = ref([
+          { id: 1, title: 'Понять реактивность', body: 'ref, effect, track/trigger' },
+          { id: 2, title: 'Собрать рендерер', body: 'vnode + diff' },
+        ])
+        const count = computed(() => items.value.length)
+        const add = (title) => {
+          items.value = [...items.value, { id: nextId++, title, body: '' }]
+        }
+        const update = (id, patch) => {
+          items.value = items.value.map((n) => (n.id === id ? { ...n, ...patch } : n))
+        }
+        const remove = (id) => {
+          items.value = items.value.filter((n) => n.id !== id)
+        }
+        const byId = (id) => items.value.find((n) => n.id === Number(id))
+        return { items, count, add, update, remove, byId }
+      })
+
+      // --- Список (маршрут /) ---------------------------------------------
+      const NoteList = {
+        setup() {
+          const notes = useNotes()
+          const { items, count } = storeToRefs(notes)
+          const draft = ref('')
+          const addNote = () => {
+            const t = draft.value.trim()
+            if (!t) return
+            notes.add(t)
+            draft.value = ''
+          }
+          return { items, count, draft, addNote }
+        },
+        template: `
+          <div>
+            <div class="card">
+              <div class="note-row" style="gap:8px">
+                <input v-model="draft" @keyup.enter="addNote" placeholder="Новая заметка…" />
+                <button class="primary" @click="addNote">Добавить</button>
+              </div>
+            </div>
+            <p class="muted">Всего заметок: <span class="pill">{{ count }}</span></p>
+            <div class="card note-row" v-for="n in items" :key="n.id">
+              <RouterLink :to="'/note/' + n.id">{{ n.title }}</RouterLink>
+            </div>
+          </div>
+        `,
+      }
+
+      // --- Деталь/редактирование (маршрут /note/:id) ----------------------
+      const NoteDetail = {
+        setup() {
+          const route = useRoute()
+          const router = useRouter()
+          const notes = useNotes()
+          const note = computed(() => notes.byId(route.params.id))
+          const showConfirm = ref(false)
+          const onTitle = (e) => notes.update(note.value.id, { title: e.target.value })
+          const onBody = (e) => notes.update(note.value.id, { body: e.target.value })
+          const del = () => {
+            notes.remove(note.value.id)
+            router.push('/')
+          }
+          return { note, showConfirm, onTitle, onBody, del }
+        },
+        template: `
+          <div v-if="note" class="card">
+            <label class="muted">Заголовок</label>
+            <input :value="note.title" @input="onTitle" />
+            <label class="muted" style="margin-top:10px;display:block">Текст</label>
+            <textarea :value="note.body" @input="onBody" rows="4"></textarea>
+            <div class="note-row" style="margin-top:14px">
+              <RouterLink to="/">← К списку</RouterLink>
+              <button class="danger" @click="showConfirm = true">Удалить</button>
+            </div>
+
+            <Teleport to="#modals">
+              <div class="backdrop" v-if="showConfirm" @click.self="showConfirm = false">
+                <div class="modal">
+                  <h3>Удалить заметку?</h3>
+                  <p class="muted">«{{ note.title }}» — действие необратимо.</p>
+                  <div class="note-row">
+                    <button @click="showConfirm = false">Отмена</button>
+                    <button class="danger" @click="del">Удалить</button>
+                  </div>
+                </div>
+              </div>
+            </Teleport>
+          </div>
+          <div v-else class="card">Заметка не найдена. <RouterLink to="/">К списку</RouterLink></div>
+        `,
+      }
+
+      const About = {
+        template: `<div class="card">
+          <p>Это демо построено на MiniVue — учебной реализации Vue 3 с нуля.</p>
+          <p class="muted">Роутер, стор, формы, Teleport — всё своё.</p>
+        </div>`,
+      }
+
+      const router = createRouter({
+        history: createWebHashHistory(),
+        routes: [
+          { path: '/', component: NoteList },
+          { path: '/note/:id', component: NoteDetail },
+          { path: '/about', component: About },
+        ],
+      })
+
+      const App = {
+        setup() {
+          // Демонстрируем $subscribe: логируем изменения стора в консоль.
+          const notes = useNotes()
+          notes.$subscribe(() => console.log('[store] заметки изменились:', notes.count))
+          return {}
+        },
+        template: `
+          <div>
+            <nav>
+              <RouterLink to="/">Заметки</RouterLink>
+              <RouterLink to="/about">О программе</RouterLink>
+            </nav>
+            <RouterView />
+          </div>
+        `,
+      }
+
+      createApp(App).use(createPinia()).use(router).mount('#app')
+    </script>
+  </body>
+</html>

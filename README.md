@@ -26,8 +26,16 @@ TypeScript. Всё, что делает браузер, видно как ест
 | 6. Store | `packages/store` | `createPinia`, `defineStore` | ✅ |
 | 7. SSR | `packages/server-renderer` | `renderToString`, гидратация | ✅ |
 
-Все 7 слоёв готовы: **64 теста** (`npm test`), 7 браузерных демо, SSR-сервер,
-учебник из 8 глав.
+Готово **12 слоёв**: **96 тестов** (`npm test`), браузерные демо, SSR-сервер,
+учебник из 13 глав. Расширенные слои (8–12):
+
+| Слой | Что внутри |
+|---|---|
+| **8. Формы** | `v-model`, `:class`/`:style` объектом/массивом, модификаторы `.stop/.prevent/.enter` |
+| **9. Реактивность+** | `watchEffect`, `readonly`, `shallowRef`, `shallowReactive`, `markRaw` |
+| **10. Директивы** | кастомные `v-*` с хуками, `<component :is>`, `v-model` на компонентах |
+| **11. Встроенные** | `Teleport`, `KeepAlive`, `defineAsyncComponent` |
+| **12. Стор+** | `$patch`, `$subscribe`, `$reset` + капстоун-приложение |
 
 ## Как запустить
 
