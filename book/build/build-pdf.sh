@@ -16,6 +16,7 @@ else
     "$ROOT/book/chapters/00-intro.md"
     "$ROOT/book/chapters/00b-javascript-minimum.md"
     "$ROOT/book/chapters/01-reactivity.md"
+    "$ROOT/book/chapters/02-vdom.md"
   )
 fi
 
