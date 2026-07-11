@@ -2,6 +2,7 @@
 // браузерный nodeOps/patchProp, но строит обычное JS-дерево в памяти. Так мы
 // проверяем алгоритм diff без браузера — и заодно доказываем, что рендерер
 // действительно платформо-независим.
+import { normalizeClass, styleToString } from '../../packages/shared.js'
 
 // Узлы — простые объекты. type: 'element' | 'text'.
 function createElement(tag) {
@@ -45,6 +46,20 @@ function patchProp(el, key, prev, next) {
     const name = key.slice(2).toLowerCase()
     if (next) el.events[name] = next
     else delete el.events[name]
+    return
+  }
+  // class/style нормализуем так же, как браузерный patchProp, — чтобы в DOM
+  // лежали строки (объект/массив → строка), как на реальной странице.
+  if (key === 'class') {
+    const c = normalizeClass(next)
+    if (c) el.props.class = c
+    else delete el.props.class
+    return
+  }
+  if (key === 'style') {
+    const s = styleToString(next)
+    if (s) el.props.style = s
+    else delete el.props.style
     return
   }
   if (next == null || next === false) delete el.props[key]

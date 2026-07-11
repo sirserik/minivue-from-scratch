@@ -111,6 +111,7 @@ export function createSSRApp(rootComponent, rootProps = null) {
 
   const app = {
     _context: context,
+    config: context.config, // для плагинов: app.config.globalProperties
     use(plugin, ...options) {
       if (plugin && typeof plugin.install === 'function') plugin.install(app, ...options)
       else if (typeof plugin === 'function') plugin(app, ...options)

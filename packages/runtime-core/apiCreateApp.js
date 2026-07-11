@@ -21,6 +21,9 @@ export function createAppAPI(render) {
     const app = {
       _context: context,
       _component: rootComponent,
+      // config с globalProperties — сюда плагины (router, pinia) кладут $router,
+      // $route, $pinia. Один объект на всё приложение.
+      config: context.config,
 
       // Подключить плагин. Плагин — объект с методом install(app) или просто
       // функция. Так работают router и pinia: app.use(router).

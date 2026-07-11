@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>MiniTrello · на MiniVue</title>
+    <style>
+      * { box-sizing: border-box; }
+      body { font-family: -apple-system, system-ui, sans-serif; margin: 0; background: #f4f6f8; color: #1c1e21; }
+      main { max-width: 900px; margin: 0 auto; padding: 20px; }
+      .topbar { display: flex; align-items: center; gap: 20px; padding: 14px 24px; background: #111827; color: #fff; }
+      .topbar strong { font-size: 18px; }
+      .topbar nav { display: flex; gap: 14px; flex: 1; }
+      .topbar nav a { color: #cbd5e1; text-decoration: none; }
+      .topbar nav a:hover { color: #fff; }
+      .pill { background: #22c55e; color: #052e12; border-radius: 999px; padding: 2px 12px; font-size: 13px; font-weight: 700; }
+      .card { background: #fff; border: 1px solid #e3e6ea; border-radius: 12px; padding: 16px; margin: 12px 0; }
+      .muted { color: #6b7280; font-size: 14px; }
+      input, select { font-size: 15px; padding: 8px 10px; border: 1px solid #cdd2d8; border-radius: 8px; }
+      button { font-size: 14px; padding: 7px 14px; border: 1px solid #cdd2d8; border-radius: 8px; background: #fff; cursor: pointer; }
+      button.primary { background: #111827; color: #fff; border-color: #111827; }
+      button.danger { color: #b91c1c; border-color: #fca5a5; }
+      .tabs { display: flex; gap: 8px; margin: 12px 0; }
+      .tabs button.active { background: #111827; color: #fff; border-color: #111827; }
+      .controls { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+      .board { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+      .column { background: #eef1f4; border-radius: 12px; padding: 12px; }
+      .column h3 { margin: 4px 0 10px; font-size: 15px; display: flex; justify-content: space-between; }
+      .kcard { background: #fff; border-radius: 8px; padding: 10px 12px; margin: 8px 0; cursor: pointer; border-left: 4px solid #cbd5e1; }
+      .kcard:hover { box-shadow: 0 2px 8px rgba(0,0,0,.08); }
+      .kcard.p-high { border-left-color: #ef4444; }
+      .kcard.p-normal { border-left-color: #3b82f6; }
+      .kcard.p-low { border-left-color: #9ca3af; }
+      .kcard.done span { text-decoration: line-through; color: #9ca3af; }
+      .arow { display: flex; justify-content: space-between; align-items: center; padding: 8px 0; border-bottom: 1px solid #eee; }
+      .backdrop { position: fixed; inset: 0; background: rgba(0,0,0,.45); display: flex; align-items: center; justify-content: center; }
+      .modal { min-width: 340px; }
+      .modal label { display: block; margin: 10px 0 4px; font-size: 13px; font-weight: 600; }
+      .modal input[type=text], .modal input:not([type]), .modal select { width: 100%; }
+      .modal .check { display: flex; align-items: center; gap: 8px; font-weight: 400; }
+      .modal-actions { display: flex; gap: 8px; margin-top: 16px; flex-wrap: wrap; }
+    </style>
+  </head>
+  <body>
+    <div id="app"></div>
+    <!-- Teleport-цель для модалок -->
+    <div id="modals"></div>
+    <script type="module" src="./main.js"></script>
+  </body>
+</html>

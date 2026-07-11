@@ -235,15 +235,29 @@ function isComponentTag(tag) {
 // --- атрибуты и обработчики → объект props ---------------------------------
 function genProps(directives) {
   const entries = []
+  // class и style собираем отдельно: на одном элементе могут быть и статический
+  // class="x", и :class="{...}". Их надо СЛИТЬ (в массив), а не затереть один
+  // другим — нормализацией на рантайме займётся normalizeClass/normalizeStyle.
+  const classParts = []
+  const styleParts = []
 
   for (const attr of directives.attrs) {
-    // Статический атрибут: значение — строковый литерал.
-    entries.push(`${JSON.stringify(attr.name)}: ${JSON.stringify(attr.value)}`)
+    if (attr.name === 'class') classParts.push(JSON.stringify(attr.value))
+    else if (attr.name === 'style') styleParts.push(JSON.stringify(attr.value))
+    else entries.push(`${JSON.stringify(attr.name)}: ${JSON.stringify(attr.value)}`)
   }
   for (const bind of directives.binds) {
     // :id="expr" — значение вычисляется. exp кладём как есть, with(ctx) достанет.
-    entries.push(`${JSON.stringify(bind.arg)}: (${bind.exp})`)
+    if (bind.arg === 'class') classParts.push(`(${bind.exp})`)
+    else if (bind.arg === 'style') styleParts.push(`(${bind.exp})`)
+    else entries.push(`${JSON.stringify(bind.arg)}: (${bind.exp})`)
   }
+  // Одна часть — как есть; несколько — массивом (normalizeClass его развернёт).
+  if (classParts.length === 1) entries.push(`"class": ${classParts[0]}`)
+  else if (classParts.length > 1) entries.push(`"class": [${classParts.join(', ')}]`)
+  if (styleParts.length === 1) entries.push(`"style": ${styleParts[0]}`)
+  else if (styleParts.length > 1) entries.push(`"style": [${styleParts.join(', ')}]`)
+
   for (const on of directives.ons) {
     // @click="handler" → onClick. Имя события с заглавной буквы.
     const key = 'on' + on.event[0].toUpperCase() + on.event.slice(1)
