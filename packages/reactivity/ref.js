@@ -55,6 +55,37 @@ export function ref(value) {
   return new RefImpl(value)
 }
 
+// shallowRef — как ref, но НЕ делает содержимое реактивным и реагирует только на
+// замену самого .value целиком (не на изменение полей объекта внутри). Полезно
+// для больших объектов, которые вы меняете заменой, а не мутацией.
+class ShallowRefImpl {
+  constructor(value) {
+    this._value = value
+    this.dep = new Set()
+    this.__isRef = true
+  }
+  get value() {
+    if (activeEffect) trackEffects(this.dep)
+    return this._value
+  }
+  set value(newValue) {
+    if (hasChanged(newValue, this._value)) {
+      this._value = newValue
+      triggerEffects(this.dep)
+    }
+  }
+}
+
+export function shallowRef(value) {
+  return new ShallowRefImpl(value)
+}
+
+// triggerRef — вручную «дёрнуть» shallowRef, если вы всё-таки изменили поле
+// внутри его значения и хотите оповестить подписчиков.
+export function triggerRef(ref) {
+  if (ref && ref.dep) triggerEffects(ref.dep)
+}
+
 export function isRef(value) {
   return !!(value && value.__isRef === true)
 }

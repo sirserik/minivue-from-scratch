@@ -17,7 +17,10 @@ const reactiveMap = new WeakMap()
 // Служебные ключи-маркеры. Читая proxy[IS_REACTIVE], можно узнать, что перед
 // нами уже реактивный объект, а через proxy[RAW] — достать исходный «сырой».
 export const IS_REACTIVE = Symbol('isReactive')
+export const IS_READONLY = Symbol('isReadonly')
 export const RAW = Symbol('raw')
+// Метка «не делать реактивным» (markRaw). Объект с ней reactive вернёт как есть.
+export const SKIP = Symbol('skip')
 
 export function reactive(target) {
   // Оборачивать имеет смысл только объекты (в т.ч. массивы). Примитивы — нет:
@@ -48,8 +51,8 @@ export function reactive(target) {
       // Ленивая глубокая реактивность: если прочитали вложенный объект —
       // оборачиваем его в reactive прямо сейчас, при обращении. Не рекурсивно
       // заранее (это было бы дорого и сломало бы объекты, которые не должны
-      // быть реактивными), а по мере необходимости.
-      if (isObject(result)) {
+      // быть реактивными), а по мере необходимости. markRaw-объекты пропускаем.
+      if (isObject(result) && !result[SKIP]) {
         return reactive(result)
       }
 
@@ -97,6 +100,66 @@ export function reactive(target) {
 // Проверка «это реактивный объект?» — через служебный маркер.
 export function isReactive(value) {
   return !!(value && value[IS_REACTIVE])
+}
+
+// --- markRaw ---------------------------------------------------------------
+// Пометить объект как «никогда не делать реактивным». Полезно для тяжёлых
+// сторонних объектов (экземпляр карты, класса), которым реактивность не нужна и
+// даже вредна. reactive() и вложенная обёртка такой объект пропустят.
+export function markRaw(value) {
+  if (isObject(value)) {
+    Object.defineProperty(value, SKIP, { value: true, configurable: true })
+  }
+  return value
+}
+
+// --- shallowReactive -------------------------------------------------------
+// Реактивность только верхнего уровня: state.count реактивен, а state.nested.x —
+// нет. Дешевле глубокой, когда вложенность менять не нужно.
+export function shallowReactive(target) {
+  if (!isObject(target)) return target
+  return new Proxy(target, {
+    get(obj, key, receiver) {
+      if (key === IS_REACTIVE) return true
+      if (key === RAW) return obj
+      const result = Reflect.get(obj, key, receiver)
+      track(obj, key)
+      return result // вложенное НЕ оборачиваем — в этом вся «мелкость»
+    },
+    set(obj, key, value, receiver) {
+      const oldValue = obj[key]
+      const result = Reflect.set(obj, key, value, receiver)
+      if (hasChanged(oldValue, value)) trigger(obj, key)
+      return result
+    },
+  })
+}
+
+// --- readonly --------------------------------------------------------------
+// Только для чтения: читать можно (в т.ч. вложенное — тоже readonly), а запись
+// молча запрещена с предупреждением. Отслеживать нечего — значение не меняется.
+export function readonly(target) {
+  if (!isObject(target)) return target
+  return new Proxy(target, {
+    get(obj, key, receiver) {
+      if (key === IS_READONLY) return true
+      if (key === RAW) return obj
+      const result = Reflect.get(obj, key, receiver)
+      return isObject(result) ? readonly(result) : result
+    },
+    set(obj, key) {
+      console.warn(`readonly: нельзя изменять свойство "${String(key)}"`)
+      return true
+    },
+    deleteProperty(obj, key) {
+      console.warn(`readonly: нельзя удалять свойство "${String(key)}"`)
+      return true
+    },
+  })
+}
+
+export function isReadonly(value) {
+  return !!(value && value[IS_READONLY])
 }
 
 // Достаём исходный, «сырой» объект из-под Proxy (например, чтобы отдать его

@@ -55,6 +55,18 @@ export function watch(source, callback, options = {}) {
   return () => effect.stop()
 }
 
+// watchEffect(fn) — «упрощённый watch без источника». Сразу выполняет fn, а затем
+// перезапускает её при изменении любых реактивных данных, которые она прочитала.
+// В отличие от watch, не даёт старое/новое значение — просто «делай это, когда
+// что-то из прочитанного изменится». Возвращает функцию остановки.
+//
+//   const stop = watchEffect(() => console.log('count =', count.value))
+export function watchEffect(fn) {
+  const effect = new ReactiveEffect(fn, () => effect.run())
+  effect.run() // первый прогон: и выполняет, и собирает зависимости
+  return () => effect.stop()
+}
+
 // Рекурсивно обходим объект, читая каждое свойство. Само чтение через
 // reactive-Proxy вызовет track, поэтому эффект подпишется на все уровни.
 // seen защищает от зацикливания на объектах со ссылками на самих себя.

@@ -6,7 +6,16 @@
 // ============================================================================
 
 export { effect, stop, ReactiveEffect, track, trigger } from './effect.js'
-export { reactive, isReactive, toRaw, isObject } from './reactive.js'
-export { ref, isRef, unref, toRef, toRefs, proxyRefs } from './ref.js'
+export {
+  reactive,
+  isReactive,
+  toRaw,
+  isObject,
+  markRaw,
+  shallowReactive,
+  readonly,
+  isReadonly,
+} from './reactive.js'
+export { ref, isRef, unref, toRef, toRefs, proxyRefs, shallowRef, triggerRef } from './ref.js'
 export { computed } from './computed.js'
-export { watch } from './watch.js'
+export { watch, watchEffect } from './watch.js'
