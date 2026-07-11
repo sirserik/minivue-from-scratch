@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>MiniVue · Слой 4: Компилятор шаблонов</title>
+    <style>
+      body { font-family: -apple-system, system-ui, sans-serif; max-width: 640px; margin: 40px auto; padding: 0 20px; line-height: 1.6; }
+      h1 { font-size: 22px; }
+      .muted { color: #6b7280; font-size: 14px; }
+      .card { border: 1px solid #e3e6ea; border-radius: 12px; padding: 16px 20px; margin: 14px 0; background: #fbfcfd; }
+      input { font-size: 15px; padding: 8px 10px; border: 1px solid #cdd2d8; border-radius: 8px; }
+      button { font-size: 14px; padding: 6px 12px; border: 1px solid #cdd2d8; border-radius: 8px; background: #fff; cursor: pointer; }
+      button:hover { background: #f0f2f5; }
+      .done { text-decoration: line-through; color: #9ca3af; }
+      li { padding: 4px 0; }
+      code { background: #eef1f4; padding: 1px 6px; border-radius: 4px; font-family: Menlo, monospace; font-size: 13px; }
+      pre { background: #f6f8fa; padding: 12px; border-radius: 8px; overflow-x: auto; font-size: 12px; }
+    </style>
+  </head>
+  <body>
+    <h1>MiniVue · Слой 4: Компилятор шаблонов</h1>
+    <p class="muted">
+      Тот же todo-список, что в слое 3, но теперь разметка описана шаблоном
+      <code>template</code>, а не функцией <code>render</code>. Компилятор
+      превращает <code>{{ }}</code>, <code>v-for</code>, <code>v-if</code>,
+      <code>:bind</code> и <code>@on</code> в вызовы <code>h()</code> прямо в
+      браузере. Внизу — реальный сгенерированный код этого шаблона.
+    </p>
+    <div id="app"></div>
+
+    <div class="card">
+      <p class="muted">Сгенерированный компилятором код render-функции:</p>
+      <pre id="code"></pre>
+    </div>
+
+    <script type="module">
+      import { createApp, ref, computed, compile } from '../packages/minivue.js'
+
+      const template = `
+        <div>
+          <input :value="draft" @input="onInput" @keydown="onKey" placeholder="Новая задача…" />
+          <button @click="add">Добавить</button>
+          <ul>
+            <li v-for="t in todos" :key="t.id">
+              <input type="checkbox" :checked="t.done" @change="toggle(t.id)" />
+              <span :class="t.done ? 'done' : ''">{{ t.text }}</span>
+              <button @click="remove(t.id)">✕</button>
+            </li>
+          </ul>
+          <p v-if="left > 0">Осталось: {{ left }}</p>
+          <p v-else>Всё сделано 🎉</p>
+        </div>
+      `
+
+      const App = {
+        template,
+        setup() {
+          let nextId = 3
+          const draft = ref('')
+          const todos = ref([
+            { id: 1, text: 'Разобрать компилятор', done: false },
+            { id: 2, text: 'Написать шаблон', done: true },
+          ])
+          const left = computed(() => todos.value.filter((t) => !t.done).length)
+          return {
+            draft,
+            todos,
+            left,
+            onInput: (e) => (draft.value = e.target.value),
+            onKey: (e) => e.key === 'Enter' && add(),
+            add,
+            toggle: (id) =>
+              (todos.value = todos.value.map((t) =>
+                t.id === id ? { ...t, done: !t.done } : t,
+              )),
+            remove: (id) => (todos.value = todos.value.filter((t) => t.id !== id)),
+          }
+          function add() {
+            const text = draft.value.trim()
+            if (!text) return
+            todos.value = [...todos.value, { id: nextId++, text, done: false }]
+            draft.value = ''
+          }
+        },
+      }
+
+      createApp(App).mount('#app')
+
+      // Показываем, во что компилятор превратил шаблон.
+      import('../packages/compiler/compile.js').then(({ compileToString }) => {
+        document.getElementById('code').textContent = compileToString(template)
+      })
+    </script>
+  </body>
+</html>

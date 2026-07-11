@@ -360,6 +360,17 @@ const PublicInstanceHandlers = {
     }
     return true
   },
+  // has нужен для with(ctx) в скомпилированных шаблонах (слой 4). with спрашивает
+  // «есть ли идентификатор в ctx?»: для состояния/props отвечаем «да» (берём из
+  // ctx), для h/_s/Fragment — «нет» (они придут из внешней области генератора).
+  has(instance, key) {
+    const { setupState, props } = instance
+    return (
+      (setupState && key in setupState) ||
+      (props && key in props) ||
+      (typeof key === 'string' && key[0] === '$')
+    )
+  },
 }
 
 // Контекст приложения по умолчанию — на случай vnode без привязки к createApp
