@@ -20,6 +20,7 @@ else
     "$ROOT/book/chapters/03-components.md"
     "$ROOT/book/chapters/04-compiler.md"
     "$ROOT/book/chapters/05-router.md"
+    "$ROOT/book/chapters/06-store.md"
   )
 fi
 

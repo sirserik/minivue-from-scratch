@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>MiniVue · Слой 6: Store</title>
+    <style>
+      body { font-family: -apple-system, system-ui, sans-serif; max-width: 640px; margin: 40px auto; padding: 0 20px; line-height: 1.6; }
+      h1 { font-size: 22px; }
+      .muted { color: #6b7280; font-size: 14px; }
+      .bar { display: flex; justify-content: space-between; align-items: center; padding: 12px 16px; background: #111827; color: #fff; border-radius: 10px; }
+      .badge { background: #22c55e; color: #062; border-radius: 999px; padding: 2px 10px; font-weight: 700; }
+      .card { border: 1px solid #e3e6ea; border-radius: 12px; padding: 16px 20px; margin: 14px 0; background: #fbfcfd; }
+      .row { display: flex; justify-content: space-between; align-items: center; padding: 6px 0; }
+      button { font-size: 14px; padding: 6px 12px; border: 1px solid #cdd2d8; border-radius: 8px; background: #fff; cursor: pointer; }
+      button:hover { background: #f0f2f5; }
+      code { background: #eef1f4; padding: 1px 6px; border-radius: 4px; font-family: Menlo, monospace; font-size: 13px; }
+    </style>
+  </head>
+  <body>
+    <h1>MiniVue · Слой 6: Store</h1>
+    <p class="muted">
+      Два независимых компонента — «шапка» и «каталог» — делят одно состояние
+      корзины через стор. Ни props, ни emit между ними нет: оба вызывают
+      <code>useCart()</code> и получают тот же экземпляр. Счётчик в шапке
+      обновляется, когда вы добавляете товар в каталоге.
+    </p>
+    <div id="app"></div>
+
+    <script type="module">
+      import { createApp, ref, computed } from '../packages/minivue.js'
+      import { createPinia, defineStore, storeToRefs } from '../packages/store/index.js'
+
+      // Стор корзины в стиле setup (Composition API).
+      const useCart = defineStore('cart', () => {
+        const items = ref([])
+        const count = computed(() => items.value.length)
+        const total = computed(() => items.value.reduce((s, p) => s + p.price, 0))
+        const add = (product) => (items.value = [...items.value, product])
+        const clear = () => (items.value = [])
+        return { items, count, total, add, clear }
+      })
+
+      // Шапка: только читает стор.
+      const Header = {
+        setup: () => ({ cart: useCart() }),
+        template: `
+          <div class="bar">
+            <strong>MiniShop</strong>
+            <span>🛒 <span class="badge">{{ cart.count }}</span> · {{ cart.total }} ₸</span>
+          </div>
+        `,
+      }
+
+      // Каталог: меняет стор.
+      const Catalog = {
+        setup() {
+          const cart = useCart()
+          const products = [
+            { id: 1, name: 'Клавиатура', price: 12000 },
+            { id: 2, name: 'Мышь', price: 6000 },
+            { id: 3, name: 'Монитор', price: 85000 },
+          ]
+          return { cart, products }
+        },
+        template: `
+          <div class="card">
+            <div class="row" v-for="p in products" :key="p.id">
+              <span>{{ p.name }} — {{ p.price }} ₸</span>
+              <button @click="cart.add(p)">В корзину</button>
+            </div>
+            <p class="muted">В корзине {{ cart.count }} товаров на {{ cart.total }} ₸.
+              <button @click="cart.clear()">Очистить</button></p>
+          </div>
+        `,
+      }
+
+      const App = {
+        components: {},
+        setup: () => ({}),
+        template: `<div><Header /><Catalog /></div>`,
+      }
+
+      const app = createApp(App)
+      // Регистрируем компоненты глобально, чтобы шаблон нашёл <Header>/<Catalog>.
+      app.component('Header', Header)
+      app.component('Catalog', Catalog)
+      app.use(createPinia())
+      app.mount('#app')
+    </script>
+  </body>
+</html>
