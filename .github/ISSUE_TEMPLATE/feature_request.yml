@@ -1,0 +1,22 @@
+name: Idea / improvement
+description: A new demo, a clearer explanation, an extra edge-case test, or a missing Vue feature to rebuild.
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        MiniVue trades completeness for readability. Ideas that keep the code
+        small and teachable are the most welcome.
+  - type: textarea
+    id: idea
+    attributes:
+      label: What would you like to see?
+    validations:
+      required: true
+  - type: textarea
+    id: why
+    attributes:
+      label: Why does it help learners?
+      description: How it improves understanding of how Vue works.
+    validations:
+      required: false

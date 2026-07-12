@@ -1,0 +1,44 @@
+name: Bug report
+description: Something in the framework or a demo behaves differently than the book says.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report! MiniVue is a teaching project, so please point at
+        the layer involved — it helps pin the bug to a chapter and a package.
+  - type: input
+    id: layer
+    attributes:
+      label: Which layer / package?
+      placeholder: "e.g. reactivity, runtime-core, compiler, router, store, server-renderer"
+    validations:
+      required: false
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect?
+      description: What the book/chapter led you to believe would happen.
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: What happened instead?
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Minimal reproduction
+      description: A small snippet, a failing test, or the playground demo + steps.
+      render: js
+    validations:
+      required: false
+  - type: input
+    id: node
+    attributes:
+      label: Node version
+      placeholder: "node --version"
+    validations:
+      required: false
