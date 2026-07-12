@@ -134,6 +134,10 @@ export function createComponentSystem(internals) {
     // The parent re-rendered and handed the component a new vnode (possibly with
     // new props). Reuse the existing instance.
     const instance = (n2.component = n1.component)
+    // Carry the current DOM node over synchronously. The real re-render is queued
+    // (below), but a keyed-list diff may need n2.el *right now* to move the node —
+    // without this, moving a keyed component throws "insertBefore ... not a Node".
+    n2.el = n1.el
     instance.next = n2 // the "next" vnode is processed before re-rendering
     // Queue the update (deduplicated: even if props also reactively trigger the
     // effect, the component re-renders only once).

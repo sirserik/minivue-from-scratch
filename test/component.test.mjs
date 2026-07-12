@@ -205,6 +205,40 @@ test('lifecycle: onMounted and onUnmounted are called', async () => {
   assert.deepEqual(log, ['mounted', 'unmounted'])
 })
 
+// Regression: a keyed list of COMPONENTS (not plain elements) must reorder
+// without crashing. Moving a keyed component needs its vnode.el synchronously,
+// which updateComponent now carries over from the previous vnode. Before that
+// fix a reorder threw "insertBefore ... is not of type Node".
+test('component: keyed list of components reorders and moves without crashing', async () => {
+  const Item = {
+    props: ['label'],
+    render(ctx) {
+      return h('li', { id: ctx.label }, ctx.label)
+    },
+  }
+  const keys = ref(['a', 'b', 'c'])
+  const App = {
+    setup() {
+      return () => h('ul', keys.value.map((k) => h(Item, { key: k, label: k })))
+    },
+  }
+  const root = createRoot()
+  render(createVNode(App), root)
+  assert.equal(serialize(root), '<ul><li id="a">a</li><li id="b">b</li><li id="c">c</li></ul>')
+
+  keys.value = ['c', 'b', 'a'] // full reverse — every component must move
+  await nextTick()
+  assert.equal(serialize(root), '<ul><li id="c">c</li><li id="b">b</li><li id="a">a</li></ul>')
+
+  keys.value = ['c', 'x', 'b', 'a'] // insert a new component in the middle
+  await nextTick()
+  assert.equal(serialize(root), '<ul><li id="c">c</li><li id="x">x</li><li id="b">b</li><li id="a">a</li></ul>')
+
+  keys.value = ['x'] // collapse to one survivor
+  await nextTick()
+  assert.equal(serialize(root), '<ul><li id="x">x</li></ul>')
+})
+
 // --- small helpers ----------------------------------------------------------
 function renderComp(comp, root) {
   const vnode = createVNode(comp)

@@ -231,6 +231,16 @@ createApp(App)
   .mount('#app')
 ```
 
+## A gotcha: moving a keyed component needs its `el`
+
+When a keyed list re-orders, the diff moves nodes by inserting `vnode.el` before an
+anchor. A component's re-render is *queued*, so `updateComponent` must copy the DOM
+node over synchronously — `n2.el = n1.el` — the moment it receives the new vnode.
+Skip that one line and a reordered list of components (say, sorting a product grid)
+throws `insertBefore ... is not of type Node`, because the moved vnode has no `el`
+yet. Plain elements never hit this — their `el` is assigned during patch — which is
+why the bug only surfaces once you build a keyed list of *components*.
+
 ## Check yourself
 
 ```bash
