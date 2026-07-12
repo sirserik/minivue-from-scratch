@@ -1,4 +1,4 @@
-// Тесты слоя 11: Teleport, KeepAlive, defineAsyncComponent.
+// Layer 11 tests: Teleport, KeepAlive, defineAsyncComponent.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
@@ -6,7 +6,7 @@ import '../packages/compiler/index.js'
 import { createRenderer } from '../packages/runtime-core/renderer.js'
 import { createComponentSystem } from '../packages/runtime-core/component.js'
 import { createVNode, h } from '../packages/runtime-core/vnode.js'
-// KeepAlive используется в тесте через шаблон (<KeepAlive>), а не напрямую.
+// KeepAlive is used in the test through a template (<KeepAlive>), not directly.
 import { Teleport, defineAsyncComponent } from '../packages/runtime-core/builtins.js'
 import { ref, shallowRef } from '../packages/reactivity/index.js'
 import { nextTick } from '../packages/runtime-core/scheduler.js'
@@ -27,24 +27,24 @@ function findTag(node, tag) {
 }
 
 // --- Teleport ---------------------------------------------------------------
-test('Teleport: дети рендерятся в целевом контейнере, а не на месте', () => {
+test('Teleport: children render in the target container, not in place', () => {
   const root = createRoot()
   const target = createRoot()
-  render(h(Teleport, { to: target }, [h('div', 'модалка')]), root)
-  assert.equal(serialize(target), '<div>модалка</div>') // ушли в target
-  assert.equal(serialize(root), '') // на месте только пустой якорь
+  render(h(Teleport, { to: target }, [h('div', 'modal')]), root)
+  assert.equal(serialize(target), '<div>modal</div>') // went to target
+  assert.equal(serialize(root), '') // only an empty anchor stays in place
 })
 
-test('Teleport: обновление детей идёт в целевой контейнер', () => {
+test('Teleport: updating children goes to the target container', () => {
   const root = createRoot()
   const target = createRoot()
-  render(h(Teleport, { to: target }, [h('div', 'раз')]), root)
-  render(h(Teleport, { to: target }, [h('div', 'два')]), root)
-  assert.equal(serialize(target), '<div>два</div>')
+  render(h(Teleport, { to: target }, [h('div', 'one')]), root)
+  render(h(Teleport, { to: target }, [h('div', 'two')]), root)
+  assert.equal(serialize(target), '<div>two</div>')
 })
 
 // --- KeepAlive --------------------------------------------------------------
-test('KeepAlive: состояние сохраняется при переключении', async () => {
+test('KeepAlive: state is preserved when switching', async () => {
   let aState
   const A = {
     setup() {
@@ -70,17 +70,17 @@ test('KeepAlive: состояние сохраняется при переклю
   render(createVNode(App), root)
   assert.equal(serialize(root), '<button>A0</button>')
 
-  // Меняем состояние A.
+  // Change A's state.
   findTag(root, 'button').events.click()
   await nextTick()
   assert.equal(serialize(root), '<button>A1</button>')
 
-  // Переключаемся на B.
+  // Switch to B.
   cur.value = B
   await nextTick()
   assert.equal(serialize(root), '<span>B</span>')
 
-  // Возвращаемся к A — состояние (A1) должно сохраниться, а не сброситься в A0.
+  // Switch back to A — its state (A1) must be preserved, not reset to A0.
   cur.value = A
   await nextTick()
   assert.equal(serialize(root), '<button>A1</button>')
@@ -88,27 +88,27 @@ test('KeepAlive: состояние сохраняется при переклю
 })
 
 // --- defineAsyncComponent ---------------------------------------------------
-test('defineAsyncComponent: сначала загрузка, потом компонент', async () => {
-  const Real = { render: () => h('b', 'готово') }
+test('defineAsyncComponent: loading first, then the component', async () => {
+  const Real = { render: () => h('b', 'done') }
   const Async = defineAsyncComponent(() => Promise.resolve(Real))
 
   const root = createRoot()
   render(createVNode(Async), root)
-  assert.equal(serialize(root), '<span>Загрузка…</span>') // пока грузится
+  assert.equal(serialize(root), '<span>Loading…</span>') // while loading
 
   await flush()
   await nextTick()
-  assert.equal(serialize(root), '<b>готово</b>') // загрузилось
+  assert.equal(serialize(root), '<b>done</b>') // loaded
 })
 
-test('defineAsyncComponent: ошибка загрузки', async () => {
+test('defineAsyncComponent: load failure', async () => {
   const Async = defineAsyncComponent({
-    loader: () => Promise.reject(new Error('нет сети')),
-    errorComponent: { render: () => h('em', 'сбой') },
+    loader: () => Promise.reject(new Error('no network')),
+    errorComponent: { render: () => h('em', 'failed') },
   })
   const root = createRoot()
   render(createVNode(Async), root)
   await flush()
   await nextTick()
-  assert.equal(serialize(root), '<em>сбой</em>')
+  assert.equal(serialize(root), '<em>failed</em>')
 })

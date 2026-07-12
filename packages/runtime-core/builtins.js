@@ -1,59 +1,65 @@
 // ============================================================================
-//  builtins.js — встроенные компоненты (Teleport, KeepAlive, async)
+//  builtins.js — built-in components (Teleport, KeepAlive, async)
 // ----------------------------------------------------------------------------
-//  Это не обычные компоненты: у них есть особые метки (__isTeleport, __isKeepAlive),
-//  по которым рендерер понимает, что обрабатывать их надо иначе. Компилятор
-//  находит их по имени через resolveComponent (см. список BUILTINS в component.js).
+//  These are not ordinary components: they carry special markers (__isTeleport,
+//  __isKeepAlive) by which the renderer knows to handle them differently. The
+//  compiler resolves them by name via resolveComponent (see the BUILTINS list in
+//  component.js).
 // ============================================================================
 
 import { h } from './vnode.js'
 import { ref } from '../reactivity/index.js'
 
 // ---------------------------------------------------------------------------
-//  Teleport — «портал»: рисует своих детей не на месте, а в указанном контейнере.
-//  Нужен для оверлеев, модалок, тултипов: логически элемент внутри компонента, а
-//  физически — в конце <body>, чтобы не резался overflow'ом и z-index'ом родителя.
+//  Teleport — a "portal": renders its children not in place, but into a given
+//  container. Useful for overlays, modals, tooltips: logically the element sits
+//  inside the component, but physically at the end of <body>, so it isn't clipped
+//  by the parent's overflow or z-index.
 //
 //    <Teleport to="#modals"><div class="modal">...</div></Teleport>
 //
-//  Сам компонент — просто метка; вся логика в рендерере (processTeleport).
+//  The component itself is just a marker; all the logic is in the renderer
+//  (processTeleport).
 // ---------------------------------------------------------------------------
+/** Teleport built-in: renders its children into the container given by the `to` prop. */
 export const Teleport = {
   name: 'Teleport',
   __isTeleport: true,
 }
 
 // ---------------------------------------------------------------------------
-//  KeepAlive — кэширует неактивные компоненты вместо их уничтожения. Переключили
-//  вкладку и вернулись — состояние (введённый текст, позиция) на месте. Оборачивает
-//  динамический компонент:
+//  KeepAlive — caches inactive components instead of destroying them. Switch a
+//  tab away and back, and the state (typed text, scroll position) is still there.
+//  It wraps a dynamic component:
 //
 //    <KeepAlive><component :is="tab" /></KeepAlive>
 //
-//  Логика активации/деактивации — в рендерере (по меткам на vnode). Здесь мы лишь
-//  ведём кэш «ключ → vnode с живым инстансом» и расставляем метки.
+//  The activation/deactivation logic lives in the renderer (driven by markers on
+//  the vnode). Here we only keep a "key → vnode with a live instance" cache and
+//  set the markers.
 // ---------------------------------------------------------------------------
+/** KeepAlive built-in: caches the wrapped dynamic component so its state survives toggling. */
 export const KeepAlive = {
   name: 'KeepAlive',
   __isKeepAlive: true,
   setup(props, { slots }) {
-    const cache = new Map() // ключ компонента → его закэшированный vnode
+    const cache = new Map() // component key → its cached vnode
 
     return () => {
       const children = slots.default ? slots.default() : []
       const vnode = children[0]
-      // Кэшируем только компоненты (у тегов состояние хранить незачем).
+      // Only cache components (there's no state worth keeping for plain tags).
       if (!vnode || typeof vnode.type !== 'object') return vnode || null
 
       const key = vnode.key != null ? vnode.key : vnode.type
       if (cache.has(key)) {
-        // Уже видели: переиспользуем живой инстанс из кэша.
+        // Seen before: reuse the live instance from the cache.
         vnode.component = cache.get(key).component
-        vnode.__keptAlive = true // рендерер «оживит», а не смонтирует заново
+        vnode.__keptAlive = true // the renderer "reactivates" instead of remounting
       } else {
         cache.set(key, vnode)
       }
-      // При уходе рендерер спрячет этот vnode в хранилище, а не разрушит.
+      // On leave, the renderer stashes this vnode away instead of destroying it.
       vnode.__shouldKeepAlive = true
       return vnode
     }
@@ -61,12 +67,19 @@ export const KeepAlive = {
 }
 
 // ---------------------------------------------------------------------------
-//  defineAsyncComponent — компонент, который грузится по требованию (код придёт
-//  позже, например по сети). Пока грузится — показываем «загрузку», после —
-//  настоящий компонент. Реактивность делает всё сама: ref переключает вид.
+//  defineAsyncComponent — a component loaded on demand (the code arrives later,
+//  e.g. over the network). While it loads we show a "loading" placeholder, then
+//  the real component. Reactivity does the rest: a ref switches the view.
 //
 //    const Chart = defineAsyncComponent(() => import('./Chart.js'))
 // ---------------------------------------------------------------------------
+/**
+ * Create a wrapper component that lazily loads its real implementation.
+ * @param {(() => Promise<object>)|{loader: () => Promise<object>, loadingComponent?: object, errorComponent?: object}} source
+ *   A loader function, or an options object with a loader plus optional
+ *   loadingComponent/errorComponent.
+ * @returns {object} The async component wrapper.
+ */
 export function defineAsyncComponent(source) {
   const options = typeof source === 'function' ? { loader: source } : source
   let resolvedComponent = null
@@ -80,7 +93,7 @@ export function defineAsyncComponent(source) {
       options
         .loader()
         .then((mod) => {
-          // Поддерживаем и `export default`, и прямой возврат компонента.
+          // Support both `export default` and returning the component directly.
           resolvedComponent = mod && mod.default ? mod.default : mod
           loaded.value = true
         })
@@ -91,13 +104,13 @@ export function defineAsyncComponent(source) {
       return () => {
         if (loaded.value && resolvedComponent) return h(resolvedComponent)
         if (error.value) {
-          return options.errorComponent ? h(options.errorComponent) : h('span', 'Ошибка загрузки')
+          return options.errorComponent ? h(options.errorComponent) : h('span', 'Loading failed')
         }
-        return options.loadingComponent ? h(options.loadingComponent) : h('span', 'Загрузка…')
+        return options.loadingComponent ? h(options.loadingComponent) : h('span', 'Loading…')
       }
     },
   }
 }
 
-// Карта встроенных компонентов — по ней resolveComponent находит их по имени.
+// Map of built-in components — resolveComponent uses it to find them by name.
 export const BUILTIN_COMPONENTS = { Teleport, KeepAlive }

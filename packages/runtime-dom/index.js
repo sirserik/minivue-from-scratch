@@ -1,8 +1,8 @@
 // ============================================================================
-//  runtime-dom — «сборка» рендерера под браузер.
-//  Соединяем платформо-независимый renderer из runtime-core с браузерными
-//  операциями nodeOps и patchProp, подключаем систему компонентов и отдаём
-//  наружу готовые render(), createApp() и весь публичный API.
+//  runtime-dom — the browser "build" of the renderer.
+//  Combines the platform-agnostic renderer from runtime-core with the browser
+//  operations nodeOps and patchProp, wires in the component system, and
+//  exposes ready-to-use render(), createApp() and the whole public API.
 // ============================================================================
 
 import { createRenderer } from '../runtime-core/renderer.js'
@@ -11,22 +11,28 @@ import { createAppAPI } from '../runtime-core/apiCreateApp.js'
 import { nodeOps } from './nodeOps.js'
 import { patchProp } from './patchProp.js'
 
-// Набор операций: узлы + patchProp.
+// Operation set: node ops + patchProp.
 const rendererOptions = { ...nodeOps, patchProp }
 
-// Экземпляр рендерера для браузера.
+// Renderer instance for the browser.
 const renderer = createRenderer(rendererOptions)
 
-// Подключаем поддержку компонентов: рендерер отдаёт свои внутренности, система
-// компонентов возвращает обработчики, которые рендерер вставляет в patch.
+// Wire in component support: the renderer exposes its internals, and the
+// component system returns handlers that the renderer plugs into patch.
 renderer.__installComponents((internals) => createComponentSystem(internals))
 
-// Публичные точки входа.
+// Public entry points.
 export const render = renderer.render
-export const hydrate = renderer.hydrate // «оживление» серверного HTML (слой 7)
+export const hydrate = renderer.hydrate // hydrate server-rendered HTML (layer 7)
+/**
+ * Create an application instance bound to the browser renderer.
+ * @param {object} rootComponent - Root component definition.
+ * @param {object} [rootProps] - Props passed to the root component.
+ * @returns {object} App instance with mount()/unmount()/use()/etc.
+ */
 export const createApp = createAppAPI(renderer.render)
 
-// Реэкспорт всего пользовательского API из ядра — один импорт на всё.
+// Re-export the entire user-facing API from the core — one import for all of it.
 export {
   h,
   createVNode,

@@ -1,6 +1,6 @@
 // ============================================================================
-//  components.js — все компоненты MiniTrello (кроме асинхронной StatsPanel).
-//  Держим в одном файле, потому что BoardView и CardModal ссылаются друг на друга.
+//  components.js — all MiniTrello components (except the async StatsPanel).
+//  Kept in one file because BoardView and CardModal reference each other.
 // ============================================================================
 import {
   ref,
@@ -13,14 +13,14 @@ import { storeToRefs } from '../../packages/store/index.js'
 import { useBoard } from './store.js'
 
 const PRIORITIES = [
-  { v: 'low', n: 'Низкий' },
-  { v: 'normal', n: 'Обычный' },
-  { v: 'high', n: 'Высокий' },
+  { v: 'low', n: 'Low' },
+  { v: 'normal', n: 'Normal' },
+  { v: 'high', n: 'High' },
 ]
 
 // ---------------------------------------------------------------------------
-//  CardModal — модалка редактирования карточки. Живёт в #modals через Teleport.
-//  Редактируем локальную копию (черновик) и коммитим по «Сохранить».
+//  CardModal — card edit modal. Lives in #modals via Teleport.
+//  We edit a local copy (draft) and commit it on "Save".
 // ---------------------------------------------------------------------------
 export const CardModal = {
   name: 'CardModal',
@@ -28,7 +28,7 @@ export const CardModal = {
   setup(props, { emit }) {
     const board = useBoard()
     const card = board.byId(props.id)
-    // Черновик правки — отдельные ref, связанные с полями через v-model.
+    // Edit draft — separate refs bound to the fields via v-model.
     const title = ref(card ? card.title : '')
     const priority = ref(card ? card.priority : 'normal')
     const done = ref(card ? card.done : false)
@@ -52,21 +52,21 @@ export const CardModal = {
     <Teleport to="#modals">
       <div class="backdrop" @click.self="close">
         <div class="modal card" v-click-outside="close">
-          <h3>Карточка</h3>
-          <label>Заголовок</label>
+          <h3>Card</h3>
+          <label>Title</label>
           <input v-model="title" v-focus @keyup.enter="save" />
-          <label>Приоритет</label>
+          <label>Priority</label>
           <select v-model="priority">
             <option v-for="p in priorities" :key="p.v" :value="p.v">{{ p.n }}</option>
           </select>
           <label class="check">
-            <input type="checkbox" v-model="done" /> Выполнено
+            <input type="checkbox" v-model="done" /> Done
           </label>
           <div class="modal-actions">
-            <button class="primary" @click="save">Сохранить</button>
-            <button @click="archive">В архив</button>
-            <button class="danger" @click="remove">Удалить</button>
-            <button @click="close">Отмена</button>
+            <button class="primary" @click="save">Save</button>
+            <button @click="archive">Archive</button>
+            <button class="danger" @click="remove">Delete</button>
+            <button @click="close">Cancel</button>
           </div>
         </div>
       </div>
@@ -75,7 +75,7 @@ export const CardModal = {
 }
 
 // ---------------------------------------------------------------------------
-//  BoardView — сама доска: колонки, поиск, добавление, открытие карточки.
+//  BoardView — the board itself: columns, search, adding, opening a card.
 // ---------------------------------------------------------------------------
 export const BoardView = {
   name: 'BoardView',
@@ -85,13 +85,13 @@ export const BoardView = {
     const search = ref('')
     const draft = ref('')
     const draftCol = ref('todo')
-    const selected = ref(null) // id открытой карточки (для модалки)
+    const selected = ref(null) // id of the open card (for the modal)
 
-    // Метод-фильтр: карточки колонки, подходящие под поиск.
+    // Filter method: a column's cards that match the search.
     const filtered = (colId) =>
       board.byColumn(colId).filter((c) => c.title.toLowerCase().includes(search.value.toLowerCase()))
 
-    // Сколько всего карточек подходит под текущий поиск (для подсказки-пустышки).
+    // How many cards match the current search (for the empty-state hint).
     const matchCount = computed(() =>
       board.active.filter((c) => c.title.toLowerCase().includes(search.value.toLowerCase())).length,
     )
@@ -108,19 +108,19 @@ export const BoardView = {
   template: `
     <div>
       <div class="controls card">
-        <input class="search" v-model="search" placeholder="🔎 Поиск карточек…" />
+        <input class="search" v-model="search" placeholder="🔎 Search cards…" />
         <button v-if="search" @click="search = ''">✕</button>
         <span class="sep"></span>
-        <input v-model="draft" @keyup.enter="add" placeholder="Новая карточка…" />
+        <input v-model="draft" @keyup.enter="add" placeholder="New card…" />
         <select v-model="draftCol">
           <option v-for="c in board.columns" :key="c.id" :value="c.id">{{ c.name }}</option>
         </select>
-        <button class="primary" @click="add">Добавить</button>
+        <button class="primary" @click="add">Add</button>
       </div>
 
       <p v-if="search && matchCount === 0" class="muted">
-        По запросу «{{ search }}» ничего не найдено — карточки скрыты фильтром.
-        <button @click="search = ''">Показать все</button>
+        Nothing found for «{{ search }}» — cards are hidden by the filter.
+        <button @click="search = ''">Show all</button>
       </p>
 
       <div class="board">
@@ -138,20 +138,20 @@ export const BoardView = {
   `,
 }
 
-// Асинхронно загружаемая панель статистики.
+// Asynchronously loaded stats panel.
 const StatsPanel = defineAsyncComponent(() => import('./StatsPanel.js'))
 
 // ---------------------------------------------------------------------------
-//  BoardPage — страница доски с вкладками «Доска»/«Статистика» под KeepAlive
-//  (состояние поиска на доске сохраняется при переключении вкладок).
+//  BoardPage — board page with "Board"/"Stats" tabs under KeepAlive
+//  (the board's search state is preserved when switching tabs).
 // ---------------------------------------------------------------------------
 export const BoardPage = {
   name: 'BoardPage',
   setup() {
     const tab = shallowRef(BoardView)
     const tabs = [
-      { name: 'Доска', comp: BoardView },
-      { name: 'Статистика', comp: StatsPanel },
+      { name: 'Board', comp: BoardView },
+      { name: 'Stats', comp: StatsPanel },
     ]
     return { tab, tabs }
   },
@@ -167,7 +167,7 @@ export const BoardPage = {
 }
 
 // ---------------------------------------------------------------------------
-//  ArchivePage — список архивных карточек с возможностью восстановить.
+//  ArchivePage — list of archived cards with the option to restore them.
 // ---------------------------------------------------------------------------
 export const ArchivePage = {
   name: 'ArchivePage',
@@ -178,23 +178,23 @@ export const ArchivePage = {
   },
   template: `
     <div class="card">
-      <h3>Архив</h3>
-      <p v-if="archivedCards.length === 0" class="muted">Архив пуст.</p>
+      <h3>Archive</h3>
+      <p v-if="archivedCards.length === 0" class="muted">The archive is empty.</p>
       <div class="arow" v-for="card in archivedCards" :key="card.id">
         <span>{{ card.title }}</span>
-        <button @click="restore(card.id)">Восстановить</button>
+        <button @click="restore(card.id)">Restore</button>
       </div>
     </div>
   `,
 }
 
 // ---------------------------------------------------------------------------
-//  App — корень: шапка с навигацией и счётчиком, RouterView.
+//  App — root: header with navigation and a counter, RouterView.
 // ---------------------------------------------------------------------------
 export const App = {
   name: 'App',
   setup() {
-    provide('appName', 'MiniTrello') // демонстрация provide/inject
+    provide('appName', 'MiniTrello') // provide/inject demonstration
     const board = useBoard()
     const { count } = storeToRefs(board)
     return { count }
@@ -204,10 +204,10 @@ export const App = {
       <header class="topbar">
         <strong>MiniTrello</strong>
         <nav>
-          <RouterLink to="/">Доска</RouterLink>
-          <RouterLink to="/archive">Архив</RouterLink>
+          <RouterLink to="/">Board</RouterLink>
+          <RouterLink to="/archive">Archive</RouterLink>
         </nav>
-        <span class="pill">Активных: {{ count }}</span>
+        <span class="pill">Active: {{ count }}</span>
       </header>
       <main><RouterView /></main>
     </div>

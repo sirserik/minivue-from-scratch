@@ -1,14 +1,15 @@
 // ============================================================================
-//  Публичный вход компилятора + подключение его к рантайму.
-//  Импортировав этот файл, компонент сможет иметь свойство template — рантайм
-//  автоматически скомпилирует его в render-функцию (см. finishComponentSetup в
-//  component.js). Так замыкается цепочка: строка-шаблон → h(...) → DOM.
+//  Public compiler entry point + wiring it into the runtime.
+//  By importing this file, a component gains the ability to have a `template`
+//  option — the runtime automatically compiles it into a render function (see
+//  finishComponentSetup in component.js). This closes the loop:
+//  template string → h(...) → DOM.
 // ============================================================================
 
 import { compile, compileToString } from './compile.js'
 import { registerRuntimeCompiler } from '../runtime-core/component.js'
 
-// Регистрируем компилятор в рантайме один раз при импорте.
+// Register the compiler with the runtime once, at import time.
 registerRuntimeCompiler(compile)
 
 export { compile, compileToString }

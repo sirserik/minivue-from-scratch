@@ -1,13 +1,13 @@
-// Публичный вход ядра рантайма (без привязки к платформе).
-// Браузерную «сборку» см. в packages/runtime-dom/index.js.
+// Public entry point of the runtime core (platform-agnostic).
+// For the browser "build", see packages/runtime-dom/index.js.
 
 // Virtual DOM
 export { h, createVNode, isVNode, normalizeVNode, withDirectives, Text, Fragment } from './vnode.js'
 
-// Рендерер
+// Renderer
 export { createRenderer } from './renderer.js'
 
-// Компоненты
+// Components
 export {
   createComponentSystem,
   getCurrentInstance,
@@ -16,10 +16,10 @@ export {
 } from './component.js'
 export { createAppAPI } from './apiCreateApp.js'
 
-// Планировщик
+// Scheduler
 export { nextTick, queueJob } from './scheduler.js'
 
-// Хуки жизненного цикла
+// Lifecycle hooks
 export {
   onBeforeMount,
   onMounted,
@@ -32,10 +32,10 @@ export {
 // provide / inject
 export { provide, inject } from './apiInject.js'
 
-// Встроенные компоненты
+// Built-in components
 export { Teleport, KeepAlive, defineAsyncComponent } from './builtins.js'
 
-// Реэкспорт реактивности — чтобы приложению хватало одного пакета.
+// Re-export reactivity — so one package is enough for the app.
 export {
   ref,
   reactive,

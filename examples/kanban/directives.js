@@ -1,18 +1,19 @@
 // ============================================================================
-//  directives.js — кастомные директивы приложения
+//  directives.js — the app's custom directives
 // ----------------------------------------------------------------------------
-//  Обе написаны с оглядкой на среду без DOM (тесты, сервер): если у элемента нет
-//  нужного метода или нет document — директива просто ничего не делает.
+//  Both are written with a DOM-less environment in mind (tests, server): if the
+//  element lacks the needed method or there is no document, the directive just
+//  does nothing.
 // ============================================================================
 
-// v-focus — поставить фокус в поле при появлении.
+// v-focus — focus the field when it appears.
 export const focus = {
   mounted(el) {
     if (el && typeof el.focus === 'function') el.focus()
   },
 }
 
-// v-click-outside="fn" — вызвать fn при клике вне элемента (закрыть меню/модалку).
+// v-click-outside="fn" — call fn on a click outside the element (close menu/modal).
 export const clickOutside = {
   mounted(el, binding) {
     if (typeof document === 'undefined') return

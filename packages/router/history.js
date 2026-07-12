@@ -1,28 +1,32 @@
 // ============================================================================
-//  history.js — три способа хранить «текущий адрес»
+//  history.js — three ways to store the "current URL"
 // ----------------------------------------------------------------------------
-//  Роутеру нужно знать, какой адрес открыт, уметь его менять и сообщать об этом,
-//  когда пользователь жмёт «назад» в браузере. Как именно хранится адрес —
-//  деталь окружения, поэтому мы прячем её за объектом history с единым
-//  интерфейсом:
+//  The router needs to know which URL is open, be able to change it, and report
+//  it when the user hits "back" in the browser. Exactly how the URL is stored is
+//  an environment detail, so we hide it behind a history object with a single
+//  interface:
 //
-//    history.location            — текущий путь ('/user/42')
-//    history.push(path)          — перейти на новый адрес
-//    history.replace(path)       — заменить текущий (без новой записи в истории)
-//    history.listen(callback)    — подписаться на изменения адреса
+//    history.location            — the current path ('/user/42')
+//    history.push(path)          — navigate to a new URL
+//    history.replace(path)       — replace the current one (no new history entry)
+//    history.listen(callback)    — subscribe to URL changes
 //
-//  Реализаций три: обычный URL (pushState), URL с решёткой (#/path) и «в памяти»
-//  (для тестов и сервера, где нет объекта window).
+//  There are three implementations: a plain URL (pushState), a hash URL (#/path),
+//  and an in-memory one (for tests and the server, where there is no window).
 // ============================================================================
 
-// --- 1. Обычные «красивые» URL через History API ---------------------------
-// /about, /user/42 — без решётки. Требует настройки сервера (любой путь должен
-// отдавать index.html), зато адреса чистые.
+// --- 1. Plain "clean" URLs via the History API ------------------------------
+// /about, /user/42 — no hash. Requires server setup (any path must serve
+// index.html), but the URLs are clean.
+/**
+ * Create an HTML5 history using the browser History API and pushState.
+ * @returns {object} a history object ({ location, push, replace, listen }).
+ */
 export function createWebHistory() {
   const listeners = []
   const notify = (path) => listeners.forEach((cb) => cb(path))
 
-  // Кнопки «назад/вперёд» браузера стреляют событием popstate.
+  // The browser's back/forward buttons fire a popstate event.
   window.addEventListener('popstate', () => notify(window.location.pathname))
 
   return {
@@ -43,13 +47,18 @@ export function createWebHistory() {
   }
 }
 
-// --- 2. URL с решёткой: /#/about -------------------------------------------
-// Всё после # браузер серверу не отправляет, поэтому такой роутинг работает на
-// любом статическом хостинге без настройки. Расплата — некрасивый адрес.
+// --- 2. Hash URLs: /#/about -------------------------------------------------
+// Everything after the # is not sent to the server, so this routing works on
+// any static host without configuration. The trade-off is an ugly URL.
+/**
+ * Create a hash history that keeps the path after the URL hash (#/about).
+ * Works on any static host without server configuration.
+ * @returns {object} a history object ({ location, push, replace, listen }).
+ */
 export function createWebHashHistory() {
   const listeners = []
   const notify = () => listeners.forEach((cb) => cb(current()))
-  const current = () => window.location.hash.slice(1) || '/' // убираем '#'
+  const current = () => window.location.hash.slice(1) || '/' // strip the '#'
 
   window.addEventListener('hashchange', notify)
 
@@ -58,7 +67,7 @@ export function createWebHashHistory() {
       return current()
     },
     push(path) {
-      window.location.hash = path // само вызовет hashchange → notify
+      window.location.hash = path // this itself triggers hashchange → notify
     },
     replace(path) {
       const href = window.location.href.replace(/#.*$/, '') + '#' + path
@@ -71,9 +80,14 @@ export function createWebHashHistory() {
   }
 }
 
-// --- 3. История «в памяти» --------------------------------------------------
-// Никакого window: адрес хранится в обычной переменной. Нужна для тестов и для
-// рендеринга на сервере (слой 7), где браузера нет.
+// --- 3. In-memory history ---------------------------------------------------
+// No window: the URL lives in a plain variable. Needed for tests and for
+// server-side rendering (layer 7), where there is no browser.
+/**
+ * Create an in-memory history for tests and server-side rendering.
+ * @param {string} [start='/'] - the initial path.
+ * @returns {object} a history object ({ location, push, replace, listen }).
+ */
 export function createMemoryHistory(start = '/') {
   const listeners = []
   let location = start

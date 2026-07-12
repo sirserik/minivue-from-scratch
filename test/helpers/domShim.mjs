@@ -1,11 +1,11 @@
-// Мини-DOM для теста гидратации: в отличие от testHost.mjs (плоские children-
-// массивы) здесь узлы поддерживают браузерный обход — firstChild, nextSibling,
-// parentNode, — который нужен функции hydrate. Плюс addEventListener, чтобы
-// проверить, что при гидратации навешиваются обработчики.
+// Mini-DOM for the hydration test: unlike testHost.mjs (flat children arrays),
+// here nodes support browser-style traversal — firstChild, nextSibling,
+// parentNode — which the hydrate function needs. Plus addEventListener, to
+// verify that handlers get attached during hydration.
 
 class SNode {
   constructor(nodeType) {
-    this.nodeType = nodeType // 1 = элемент, 3 = текст
+    this.nodeType = nodeType // 1 = element, 3 = text
     this.childNodes = []
     this.parentNode = null
     this.attrs = {}
@@ -68,7 +68,7 @@ function text(t) {
   return n
 }
 
-// Операции узлов для рендерера (как nodeOps браузера, но над шимом).
+// Node operations for the renderer (like the browser's nodeOps, but over the shim).
 export const shimOptions = {
   createElement: el,
   createText: text,
@@ -97,8 +97,8 @@ export function createRoot() {
   return r
 }
 
-// Построить «серверный» DOM из VNode БЕЗ обработчиков событий (как будто пришёл
-// HTML с сервера). Гидратация потом навесит события.
+// Build a "server" DOM from a VNode WITHOUT event handlers (as if the HTML
+// came from the server). Hydration will attach the events afterwards.
 export function buildServerDom(container, vnode, normalizeVNode) {
   build(vnode, container)
   function build(vnode, parent) {
@@ -112,7 +112,7 @@ export function buildServerDom(container, vnode, normalizeVNode) {
     }
     const node = el(type)
     for (const key in vnode.props) {
-      if (key === 'key' || /^on[A-Z]/.test(key)) continue // события сервер не пишет
+      if (key === 'key' || /^on[A-Z]/.test(key)) continue // the server doesn't write events
       const v = vnode.props[key]
       if (v != null && v !== false) node.setAttribute(key, v === true ? '' : v)
     }

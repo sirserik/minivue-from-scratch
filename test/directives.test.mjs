@@ -1,4 +1,4 @@
-// Тесты слоя 10: кастомные директивы, динамические компоненты, v-model на компонентах.
+// Layer 10 tests: custom directives, dynamic components, v-model on components.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
@@ -23,8 +23,8 @@ function findTag(node, tag) {
   return null
 }
 
-// --- кастомные директивы ----------------------------------------------------
-test('директива: mounted/updated/unmounted и binding', async () => {
+// --- custom directives ------------------------------------------------------
+test('directive: mounted/updated/unmounted and binding', async () => {
   const log = []
   let msg
   const C = {
@@ -60,31 +60,31 @@ test('директива: mounted/updated/unmounted и binding', async () => {
   assert.deepEqual(log[2], ['unmounted'])
 })
 
-test('директива: el и реальное действие над узлом', () => {
+test('directive: el and a real action on the node', () => {
   const C = {
     directives: {
       tag: {
         mounted(el, b) {
-          el.props['data-dir'] = b.value // директива меняет сам узел
+          el.props['data-dir'] = b.value // the directive mutates the node itself
         },
       },
     },
-    setup: () => ({ v: 'ок' }),
+    setup: () => ({ v: 'ok' }),
     template: '<span v-tag="v">y</span>',
   }
   const root = createRoot()
   render(createVNode(C), root)
-  assert.equal(findTag(root, 'span').props['data-dir'], 'ок')
+  assert.equal(findTag(root, 'span').props['data-dir'], 'ok')
 })
 
-// --- динамические компоненты ------------------------------------------------
-test('<component :is>: переключение компонента', async () => {
-  const One = { template: '<span>один</span>' }
-  const Two = { template: '<span>два</span>' }
+// --- dynamic components -----------------------------------------------------
+test('<component :is>: switching the component', async () => {
+  const One = { template: '<span>one</span>' }
+  const Two = { template: '<span>two</span>' }
   let current
   const C = {
     setup() {
-      const cur = shallowRef(One) // shallowRef, чтобы не оборачивать компонент
+      const cur = shallowRef(One) // shallowRef so we don't wrap the component
       current = cur
       return { cur }
     },
@@ -92,15 +92,15 @@ test('<component :is>: переключение компонента', async () 
   }
   const root = createRoot()
   render(createVNode(C), root)
-  assert.equal(serialize(root), '<span>один</span>')
+  assert.equal(serialize(root), '<span>one</span>')
 
   current.value = Two
   await nextTick()
-  assert.equal(serialize(root), '<span>два</span>')
+  assert.equal(serialize(root), '<span>two</span>')
 })
 
-test('<component :is> по имени (строка) через local components', () => {
-  const Hello = { template: '<b>привет</b>' }
+test('<component :is> by name (string) via local components', () => {
+  const Hello = { template: '<b>hello</b>' }
   const C = {
     components: { Hello },
     setup: () => ({ name: 'Hello' }),
@@ -108,11 +108,11 @@ test('<component :is> по имени (строка) через local components
   }
   const root = createRoot()
   render(createVNode(C), root)
-  assert.equal(serialize(root), '<b>привет</b>')
+  assert.equal(serialize(root), '<b>hello</b>')
 })
 
-// --- v-model на компоненте --------------------------------------------------
-test('v-model на компоненте: modelValue + update:modelValue', async () => {
+// --- v-model on a component -------------------------------------------------
+test('v-model on a component: modelValue + update:modelValue', async () => {
   const MyInput = {
     props: ['modelValue'],
     setup(props, { emit }) {
@@ -124,7 +124,7 @@ test('v-model на компоненте: modelValue + update:modelValue', async 
   const Parent = {
     components: { MyInput },
     setup() {
-      const text = ref('старт')
+      const text = ref('start')
       parentText = text
       return { text }
     },
@@ -132,11 +132,11 @@ test('v-model на компоненте: modelValue + update:modelValue', async 
   }
   const root = createRoot()
   render(createVNode(Parent), root)
-  assert.equal(findTag(root, 'input').props.value, 'старт')
+  assert.equal(findTag(root, 'input').props.value, 'start')
 
-  // Ввод в дочернем поле → emit наверх → обновляется родительское состояние.
-  findTag(root, 'input').events.input({ target: { value: 'изменено' } })
-  assert.equal(parentText.value, 'изменено')
+  // Typing into the child input → emit upward → parent state updates.
+  findTag(root, 'input').events.input({ target: { value: 'changed' } })
+  assert.equal(parentText.value, 'changed')
   await nextTick()
-  assert.equal(findTag(root, 'input').props.value, 'изменено')
+  assert.equal(findTag(root, 'input').props.value, 'changed')
 })

@@ -1,30 +1,35 @@
 // ============================================================================
-//  parse.js — из строки-шаблона в дерево-описание (AST)
+//  parse.js — from a template string to a descriptive tree (AST)
 // ----------------------------------------------------------------------------
-//  Шаблон — это просто текст: "<div class='x'>{{ msg }}</div>". Компьютер не
-//  понимает текст структурно, поэтому первый шаг компилятора — разобрать строку
-//  в дерево объектов (AST, abstract syntax tree). Каждый тег, кусок текста и
-//  вставка {{...}} становится узлом дерева. Дальше (в compile.js) по этому дереву
-//  сгенерируется render-функция.
+//  A template is just text: "<div class='x'>{{ msg }}</div>". A computer does
+//  not understand text structurally, so the compiler's first step is to parse
+//  the string into a tree of objects (an AST, abstract syntax tree). Every tag,
+//  chunk of text, and {{...}} interpolation becomes a node in the tree. Later
+//  (in compile.js) a render function is generated from this tree.
 //
-//  Мы пишем парсер «рекурсивным спуском»: идём по строке слева направо, а на
-//  вложенные теги вызываем сами себя. Позицию во входной строке храним в объекте
-//  context, откусывая от начала разобранные куски.
+//  We write a "recursive descent" parser: we walk the string left to right, and
+//  for nested tags we call ourselves. The position within the input string is
+//  kept in the `context` object, chopping the parsed pieces off the front.
 // ============================================================================
 
-// Типы узлов AST.
+// AST node types.
 export const NodeTypes = {
   ELEMENT: 'Element', // <div>...</div>
-  TEXT: 'Text', // просто текст
-  INTERPOLATION: 'Interpolation', // {{ выражение }}
+  TEXT: 'Text', // plain text
+  INTERPOLATION: 'Interpolation', // {{ expression }}
 }
 
+/**
+ * Parse a template string into an AST — an array of top-level nodes.
+ * @param {string} template - The template markup to parse.
+ * @returns {Array} Array of AST nodes (see NodeTypes).
+ */
 export function parse(template) {
   const context = { source: template.trim() }
   return parseChildren(context)
 }
 
-// Разобрать последовательность узлов, пока не упрёмся в закрывающий тег или конец.
+// Parse a sequence of nodes until we hit a closing tag or the end.
 function parseChildren(context) {
   const nodes = []
   while (!isEnd(context)) {
@@ -39,57 +44,57 @@ function parseChildren(context) {
     }
     nodes.push(node)
   }
-  // Выкидываем узлы из чистого пробела между тегами (переносы строк в разметке),
-  // чтобы не плодить пустые текстовые узлы.
+  // Drop nodes of pure whitespace between tags (newlines in the markup) so we
+  // don't spawn empty text nodes.
   return nodes.filter((n) => !(n.type === NodeTypes.TEXT && n.content.trim() === ''))
 }
 
-// Условие остановки parseChildren: конец строки или начало закрывающего тега.
+// parseChildren stop condition: end of the string or start of a closing tag.
 function isEnd(context) {
   const s = context.source
   return s.length === 0 || s.startsWith('</')
 }
 
-// Откусить n символов от начала source.
+// Chop n characters off the front of source.
 function advanceBy(context, n) {
   context.source = context.source.slice(n)
 }
 
 // --- <element ...> ---------------------------------------------------------
 function parseElement(context) {
-  // Открывающий тег: <tag attr="...">
+  // Opening tag: <tag attr="...">
   const match = /^<([a-zA-Z][\w-]*)/.exec(context.source)
   const tag = match[1]
   advanceBy(context, match[0].length)
 
   const props = parseAttributes(context)
 
-  // Самозакрывающийся тег <br/> — детей нет.
+  // A self-closing tag <br/> — no children.
   let isSelfClosing = context.source.startsWith('/>')
-  advanceBy(context, isSelfClosing ? 2 : 1) // съедаем '/>' или '>'
+  advanceBy(context, isSelfClosing ? 2 : 1) // consume '/>' or '>'
 
   if (isSelfClosing || isVoidTag(tag)) {
     return { type: NodeTypes.ELEMENT, tag, props, children: [] }
   }
 
-  // Дети — рекурсивно, до закрывающего тега.
+  // Children — recursively, up to the closing tag.
   const children = parseChildren(context)
 
-  // Съедаем закрывающий </tag>.
+  // Consume the closing </tag>.
   const closeMatch = /^<\/([a-zA-Z][\w-]*)\s*>/.exec(context.source)
   if (closeMatch) advanceBy(context, closeMatch[0].length)
 
   return { type: NodeTypes.ELEMENT, tag, props, children }
 }
 
-// Теги, у которых по HTML не бывает содержимого и закрывающего тега.
+// Tags that per HTML have no content and no closing tag.
 function isVoidTag(tag) {
   return ['br', 'hr', 'img', 'input', 'meta', 'link'].includes(tag)
 }
 
-// --- атрибуты и директивы --------------------------------------------------
-// Возвращаем «сырой» список { name, value }. Разбор директив (v-if, :bind, @on)
-// делает уже трансформатор в compile.js — так парсер остаётся простым.
+// --- attributes and directives ---------------------------------------------
+// We return a "raw" list of { name, value }. Parsing directives (v-if, :bind,
+// @on) is done by the transformer in compile.js — this keeps the parser simple.
 function parseAttributes(context) {
   const props = []
   while (
@@ -97,12 +102,12 @@ function parseAttributes(context) {
     !context.source.startsWith('>') &&
     !context.source.startsWith('/>')
   ) {
-    // Пропускаем пробелы между атрибутами.
+    // Skip whitespace between attributes.
     const ws = /^\s+/.exec(context.source)
     if (ws) advanceBy(context, ws[0].length)
     if (context.source.startsWith('>') || context.source.startsWith('/>')) break
 
-    // Имя атрибута: буквы, а также : @ - . [ ] для директив (@click, :id, v-if).
+    // Attribute name: letters, plus : @ - . [ ] for directives (@click, :id, v-if).
     const nameMatch = /^[^\s=/>]+/.exec(context.source)
     const name = nameMatch[0]
     advanceBy(context, name.length)
@@ -118,7 +123,7 @@ function parseAttributes(context) {
         value = context.source.slice(0, end)
         advanceBy(context, end + 1)
       } else {
-        // Значение без кавычек.
+        // Unquoted value.
         const m = /^[^\s>]+/.exec(context.source)
         value = m ? m[0] : ''
         advanceBy(context, value.length)
@@ -129,18 +134,18 @@ function parseAttributes(context) {
   return props
 }
 
-// --- {{ выражение }} -------------------------------------------------------
+// --- {{ expression }} ------------------------------------------------------
 function parseInterpolation(context) {
   advanceBy(context, 2) // '{{'
   const end = context.source.indexOf('}}')
   const content = context.source.slice(0, end).trim()
-  advanceBy(context, end + 2) // выражение + '}}'
+  advanceBy(context, end + 2) // expression + '}}'
   return { type: NodeTypes.INTERPOLATION, content }
 }
 
-// --- обычный текст ---------------------------------------------------------
+// --- plain text ------------------------------------------------------------
 function parseText(context) {
-  // Текст идёт до ближайшего '<' (тег) или '{{' (вставка).
+  // Text runs up to the nearest '<' (tag) or '{{' (interpolation).
   let end = context.source.length
   for (const token of ['<', '{{']) {
     const i = context.source.indexOf(token)

@@ -1,8 +1,8 @@
 // ============================================================================
-//  Публичный вход в пакет реактивности.
-//  Отсюда остальные слои (компоненты, стор, роутер) берут всё, что им нужно.
-//  Это точная копия «поверхности» настоящего @vue/reactivity, поэтому имена
-//  совпадают: ref, reactive, computed, watch, effect и т.д.
+//  Public entry point of the reactivity package.
+//  This is where the other layers (components, store, router) get everything
+//  they need. It mirrors the "surface" of the real @vue/reactivity, so the
+//  names match: ref, reactive, computed, watch, effect, etc.
 // ============================================================================
 
 export { effect, stop, ReactiveEffect, track, trigger } from './effect.js'

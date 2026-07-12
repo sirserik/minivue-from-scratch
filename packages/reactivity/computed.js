@@ -1,15 +1,15 @@
 // ============================================================================
-//  computed.js — вычисляемое значение с кэшем
+//  computed.js — a cached computed value
 // ----------------------------------------------------------------------------
-//  computed(() => a.value + b.value) — это значение, которое:
-//    1) считается лениво: формула НЕ выполняется, пока к .value не обратятся;
-//    2) кэшируется: пока зависимости (a, b) не изменились, повторное чтение
-//       отдаёт запомненный результат без пересчёта;
-//    3) само реактивно: если его читать внутри эффекта, а зависимость поменяется,
-//       эффект перезапустится.
+//  computed(() => a.value + b.value) is a value that:
+//    1) is lazy: the formula does NOT run until .value is accessed;
+//    2) is cached: as long as the dependencies (a, b) haven't changed, a repeat
+//       read returns the remembered result without recomputing;
+//    3) is reactive itself: if it is read inside an effect and a dependency
+//       changes, that effect re-runs.
 //
-//  Всё это собирается из уже готовых кирпичиков: ReactiveEffect с ленивым
-//  запуском (lazy) и планировщиком (scheduler), плюс собственный dep, как у ref.
+//  All of this is assembled from ready-made building blocks: a ReactiveEffect
+//  with lazy start and a scheduler, plus its own dep, just like a ref.
 // ============================================================================
 
 import { ReactiveEffect, trackEffects, triggerEffects, activeEffect } from './effect.js'
@@ -17,18 +17,18 @@ import { ReactiveEffect, trackEffects, triggerEffects, activeEffect } from './ef
 class ComputedRefImpl {
   constructor(getter) {
     this._value = undefined
-    // «Грязный» флаг: true — значит зависимости менялись и нужно пересчитать.
-    // Изначально true, чтобы первый доступ посчитал значение.
+    // "Dirty" flag: true means dependencies changed and we need to recompute.
+    // Starts true so the first access computes the value.
     this._dirty = true
     this.dep = new Set()
-    this.__isRef = true // computed ведёт себя как ref: доступ через .value
+    this.__isRef = true // computed behaves like a ref: accessed via .value
 
-    // Оборачиваем формулу в эффект, но с двумя особенностями:
-    //  - lazy: сам эффект не запускаем в конструкторе (посчитаем при чтении);
-    //  - scheduler: когда зависимость изменится, Vue-система вызовет НЕ пересчёт
-    //    напрямую, а этот планировщик. Он лишь помечает значение «грязным» и
-    //    будит тех, кто читал computed. Сам пересчёт произойдёт при следующем
-    //    чтении .value — снова лениво.
+    // Wrap the formula in an effect, but with two twists:
+    //  - lazy: we don't run the effect in the constructor (compute on read);
+    //  - scheduler: when a dependency changes, the reactive system calls NOT
+    //    the recompute directly but this scheduler. It only marks the value
+    //    "dirty" and wakes whoever read the computed. The recompute itself
+    //    happens on the next .value read — lazily again.
     this.effect = new ReactiveEffect(getter, () => {
       if (!this._dirty) {
         this._dirty = true
@@ -38,11 +38,11 @@ class ComputedRefImpl {
   }
 
   get value() {
-    // Если нас читают внутри чужого эффекта — подписываем его на себя.
+    // If we're read inside someone else's effect, subscribe it to us.
     if (activeEffect) trackEffects(this.dep)
 
-    // Пересчитываем только когда «грязно». В момент effect.run() внутри getter
-    // произойдут track'и на a и b — так computed узнает свои зависимости.
+    // Recompute only when "dirty". During effect.run() the getter triggers
+    // tracks on a and b — that's how computed learns its dependencies.
     if (this._dirty) {
       this._value = this.effect.run()
       this._dirty = false
@@ -52,6 +52,11 @@ class ComputedRefImpl {
   }
 }
 
+/**
+ * Creates a lazily-evaluated, cached, reactive value from a getter.
+ * @param {() => *} getter - Function computing the value from reactive sources.
+ * @returns {ComputedRefImpl} A ref-like object whose `.value` returns the result.
+ */
 export function computed(getter) {
   return new ComputedRefImpl(getter)
 }

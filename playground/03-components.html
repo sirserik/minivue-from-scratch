@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="ru">
+<html lang="en">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>MiniVue · Слой 3: Компоненты</title>
+    <title>MiniVue · Layer 3: Components</title>
     <style>
       body { font-family: -apple-system, system-ui, sans-serif; max-width: 640px; margin: 40px auto; padding: 0 20px; line-height: 1.6; }
       h1 { font-size: 22px; }
@@ -19,20 +19,20 @@
     </style>
   </head>
   <body>
-    <h1>MiniVue · Слой 3: Компоненты</h1>
+    <h1>MiniVue · Layer 3: Components</h1>
     <p class="muted">
-      Настоящее приложение на <code>createApp</code>. Родитель <code>TodoApp</code>
-      держит состояние, дочерний <code>TodoItem</code> получает задачу через
-      <code>props</code> и сообщает наверх через <code>emit</code>. Шаблонов ещё
-      нет — разметку описываем функцией <code>render</code> и <code>h()</code>
-      (шаблоны появятся в слое 4).
+      A real app built with <code>createApp</code>. The parent <code>TodoApp</code>
+      holds the state, the child <code>TodoItem</code> receives a task through
+      <code>props</code> and reports upward via <code>emit</code>. There are no
+      templates yet — we describe the markup with a <code>render</code> function and <code>h()</code>
+      (templates arrive in layer 4).
     </p>
     <div id="app"></div>
 
     <script type="module">
       import { createApp, h, ref, computed } from '../packages/runtime-dom/index.js'
 
-      // Дочерний компонент: одна задача. Принимает props.todo, шлёт события.
+      // Child component: a single task. Receives props.todo, emits events.
       const TodoItem = {
         props: ['todo'],
         setup(props, { emit }) {
@@ -51,14 +51,14 @@
         },
       }
 
-      // Корневой компонент.
+      // Root component.
       const TodoApp = {
         setup() {
           let nextId = 3
           const draft = ref('')
           const todos = ref([
-            { id: 1, text: 'Понять реактивность', done: true },
-            { id: 2, text: 'Написать рендерер', done: false },
+            { id: 1, text: 'Understand reactivity', done: true },
+            { id: 2, text: 'Write the renderer', done: false },
           ])
           const left = computed(() => todos.value.filter((t) => !t.done).length)
 
@@ -83,14 +83,14 @@
             h('div', [
               h('input', {
                 value: ctx.draft,
-                placeholder: 'Новая задача…',
+                placeholder: 'New task…',
                 onInput: (e) => (ctx.draft = e.target.value),
                 onKeydown: (e) => e.key === 'Enter' && ctx.add(),
               }),
               ' ',
-              h('button', { onClick: ctx.add }, 'Добавить'),
+              h('button', { onClick: ctx.add }, 'Add'),
             ]),
-            // Список дочерних компонентов с ключами — работает keyed-diff слоя 2.
+            // A list of keyed child components — layer 2's keyed diff kicks in.
             h(
               'div',
               ctx.todos.map((t) =>
@@ -102,7 +102,7 @@
                 }),
               ),
             ),
-            h('p', { class: 'muted' }, `Осталось невыполненных: ${ctx.left}`),
+            h('p', { class: 'muted' }, `Remaining incomplete: ${ctx.left}`),
           ])
         },
       }

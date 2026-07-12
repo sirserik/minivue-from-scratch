@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="ru">
+<html lang="en">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -13,26 +13,26 @@
     </style>
   </head>
   <body>
-    <h1>MiniVue — учебная реализация Vue 3 с нуля</h1>
-    <p>Живые демо каждого слоя. Каждая страница импортирует наш код напрямую, без сборки.</p>
+    <h1>MiniVue — build Vue 3 from scratch</h1>
+    <p>Live demos for every layer. Each page imports our source directly, with no build step.</p>
     <ul>
-      <li><a href="./01-reactivity.html">Слой 1 — Реактивность</a> (ref, reactive, computed, effect)</li>
-      <li><a href="./02-vdom.html">Слой 2 — Virtual DOM + рендерер</a> (h, diff, keyed-списки)</li>
-      <li><a href="./03-components.html">Слой 3 — Компоненты</a> (setup, props, emit, слоты, createApp)</li>
-      <li><a href="./04-compiler.html">Слой 4 — Компилятор шаблонов</a> (template, {{}}, v-if, v-for, :bind, @on)</li>
-      <li><a href="./05-router.html">Слой 5 — Router</a> (RouterView, RouterLink, :params, guards)</li>
-      <li><a href="./06-store.html">Слой 6 — Store</a> (createPinia, defineStore, getters, actions)</li>
-      <li><a href="./07-ssr/">Слой 7 — SSR</a> (renderToString + hydrate; node playground/07-ssr/server.js)</li>
-      <li><a href="./08-forms.html">Слой 8 — Формы и привязки</a> (v-model, :class/:style, модификаторы)</li>
-      <li><a href="./10-directives.html">Слой 10 — Директивы и динамика</a> (v-focus, component :is, v-model на компонентах)</li>
-      <li><a href="./11-builtins.html">Слой 11 — Встроенные компоненты</a> (Teleport, KeepAlive, async)</li>
-      <li><a href="./12-capstone.html">Капстоун — приложение «Заметки»</a> (router + store + формы + Teleport)</li>
+      <li><a href="./01-reactivity.html">Layer 1 — Reactivity</a> (ref, reactive, computed, effect)</li>
+      <li><a href="./02-vdom.html">Layer 2 — Virtual DOM + renderer</a> (h, diff, keyed lists)</li>
+      <li><a href="./03-components.html">Layer 3 — Components</a> (setup, props, emit, slots, createApp)</li>
+      <li><a href="./04-compiler.html">Layer 4 — Template compiler</a> (template, {{}}, v-if, v-for, :bind, @on)</li>
+      <li><a href="./05-router.html">Layer 5 — Router</a> (RouterView, RouterLink, :params, guards)</li>
+      <li><a href="./06-store.html">Layer 6 — Store</a> (createPinia, defineStore, getters, actions)</li>
+      <li><a href="./07-ssr/">Layer 7 — SSR</a> (renderToString + hydrate; node playground/07-ssr/server.js)</li>
+      <li><a href="./08-forms.html">Layer 8 — Forms and bindings</a> (v-model, :class/:style, modifiers)</li>
+      <li><a href="./10-directives.html">Layer 10 — Directives and dynamics</a> (v-focus, component :is, v-model on components)</li>
+      <li><a href="./11-builtins.html">Layer 11 — Built-in components</a> (Teleport, KeepAlive, async)</li>
+      <li><a href="./12-capstone.html">Capstone — the “Notes” app</a> (router + store + forms + Teleport)</li>
     </ul>
-    <h2 style="font-size:18px">Полноценное приложение</h2>
+    <h2 style="font-size:18px">A full application</h2>
     <ul>
-      <li><a href="../examples/kanban/index.html"><b>MiniTrello</b></a> — kanban-доска: роутер, стор с
-        персистентностью, формы (v-model), Teleport-модалки, KeepAlive-вкладки, async-компонент,
-        кастомные директивы. Сквозные тесты — <code>test/app-kanban.test.mjs</code>.</li>
+      <li><a href="../examples/kanban/index.html"><b>MiniTrello</b></a> — a Kanban board: router, store with
+        persistence, forms (v-model), Teleport modals, KeepAlive tabs, an async component,
+        and custom directives. End-to-end tests — <code>test/app-kanban.test.mjs</code>.</li>
     </ul>
   </body>
 </html>

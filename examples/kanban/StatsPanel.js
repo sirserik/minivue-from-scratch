@@ -1,6 +1,6 @@
 // ============================================================================
-//  StatsPanel.js — панель статистики, загружаемая асинхронно (defineAsyncComponent).
-//  Отдельный файл, чтобы его можно было подтянуть по требованию через import().
+//  StatsPanel.js — stats panel, loaded asynchronously (defineAsyncComponent).
+//  A separate file so it can be pulled in on demand via import().
 // ============================================================================
 import { computed, watchEffect } from '../../packages/runtime-core/index.js'
 import { useBoard } from './store.js'
@@ -9,17 +9,17 @@ export default {
   name: 'StatsPanel',
   setup() {
     const board = useBoard()
-    // Счётчики по колонкам — реактивно пересчитываются при изменениях доски.
+    // Per-column counters — recomputed reactively whenever the board changes.
     const stats = computed(() =>
       board.columns.map((c) => ({ name: c.name, n: board.byColumn(c.id).length })),
     )
     const doneCount = computed(() => board.active.filter((c) => c.done).length)
 
-    // watchEffect ради демонстрации: печатает общее число активных карточек.
+    // watchEffect for demonstration: logs the total number of active cards.
     watchEffect(() => {
       if (typeof console !== 'undefined') {
         // eslint-disable-next-line no-console
-        console.log('[stats] активных карточек:', board.count)
+        console.log('[stats] active cards:', board.count)
       }
     })
 
@@ -27,11 +27,11 @@ export default {
   },
   template: `
     <div class="stats card">
-      <h3>Статистика</h3>
+      <h3>Stats</h3>
       <ul>
         <li v-for="s in stats" :key="s.name">{{ s.name }}: <b>{{ s.n }}</b></li>
       </ul>
-      <p>Готово: {{ doneCount }} из {{ total }}</p>
+      <p>Done: {{ doneCount }} of {{ total }}</p>
     </div>
   `,
 }

@@ -1,5 +1,5 @@
-// Маршруты приложения. История подставляется снаружи (hash в браузере,
-// memory в тестах) — поэтому здесь только карта путь → компонент.
+// App routes. The history is injected from outside (hash in the browser,
+// memory in tests) — so here we only have the path → component map.
 import { BoardPage, ArchivePage } from './components.js'
 
 export const routes = [

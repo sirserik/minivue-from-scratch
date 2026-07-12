@@ -1,9 +1,9 @@
-// Node-сервер SSR. На каждый запрос страницы рендерит приложение в HTML-строку
-// и отдаёт готовый HTML со вшитым клиентским скриптом для гидратации. Остальные
-// пути (наши ES-модули) раздаёт как статику.
+// Node SSR server. For each page request it renders the app into an HTML string
+// and serves the ready HTML with the embedded client script for hydration. All other
+// paths (our ES modules) are served as static files.
 //
 //   node playground/07-ssr/server.js
-//   открыть http://localhost:5174/
+//   open http://localhost:5174/
 import http from 'node:http'
 import fs from 'node:fs'
 import path from 'node:path'
@@ -24,7 +24,7 @@ const MIME = {
 }
 
 const page = (appHtml) => `<!DOCTYPE html>
-<html lang="ru">
+<html lang="en">
   <head>
     <meta charset="UTF-8" />
     <title>MiniVue · SSR</title>
@@ -37,9 +37,9 @@ const page = (appHtml) => `<!DOCTYPE html>
     </style>
   </head>
   <body>
-    <!-- Сюда сервер положил уже отрисованный HTML: -->
+    <!-- The server placed the already-rendered HTML here: -->
     <div id="app">${appHtml}</div>
-    <!-- А этот скрипт «оживит» его на клиенте: -->
+    <!-- And this script will "bring it to life" on the client: -->
     <script type="module" src="/playground/07-ssr/client.js"></script>
   </body>
 </html>`
@@ -47,7 +47,7 @@ const page = (appHtml) => `<!DOCTYPE html>
 const server = http.createServer((req, res) => {
   const urlPath = decodeURIComponent(req.url.split('?')[0])
 
-  // Главная — серверный рендер приложения в строку.
+  // Home page — server-render the app into a string.
   if (urlPath === '/' || urlPath === '/index.html') {
     const appHtml = renderToString(createVNode(App))
     res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' })
@@ -55,7 +55,7 @@ const server = http.createServer((req, res) => {
     return
   }
 
-  // Остальное — статика (наши модули), чтобы клиент мог их импортировать.
+  // Everything else — static files (our modules) so the client can import them.
   const filePath = path.join(ROOT, path.normalize(urlPath))
   if (!filePath.startsWith(ROOT)) {
     res.writeHead(403)

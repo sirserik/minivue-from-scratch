@@ -1,31 +1,37 @@
 // ============================================================================
 //  apiInject.js — provide / inject
 // ----------------------------------------------------------------------------
-//  Обычно данные передают сверху вниз через props: родитель → ребёнок → внук.
-//  Если внуку глубоко внизу нужно что-то от далёкого предка, тащить это через
-//  все промежуточные компоненты («бурение пропсов») мучительно. provide/inject
-//  решают это: предок provide('ключ', значение), любой потомок inject('ключ')
-//  получает его напрямую, минуя промежуточные слои.
+//  Data is usually passed top-down through props: parent → child → grandchild.
+//  If a grandchild deep down needs something from a distant ancestor, threading
+//  it through every intermediate component ("prop drilling") is painful.
+//  provide/inject solve this: an ancestor calls provide('key', value), and any
+//  descendant inject('key') gets it directly, skipping the intermediate layers.
 //
-//  Хитрость реализации — в наследовании через прототип. У каждого компонента
-//  объект provides наследует provides родителя (Object.create). Поэтому чтение
-//  ключа само поднимается по цепочке предков, пока не найдёт значение.
+//  The implementation trick is prototype-based inheritance. Each component's
+//  provides object inherits the parent's provides (Object.create). So reading a
+//  key climbs the ancestor chain on its own until it finds a value.
 // ============================================================================
 
 import { getCurrentInstance } from './component.js'
 
+/**
+ * Provide a value keyed by `key` to all descendant components. Must be called
+ * inside setup().
+ * @param {string|symbol} key Injection key.
+ * @param {*} value Value made available to descendants via inject.
+ */
 export function provide(key, value) {
   const instance = getCurrentInstance()
   if (!instance) {
-    console.warn('provide() можно вызывать только внутри setup()')
+    console.warn('provide() can only be called inside setup()')
     return
   }
 
   let provides = instance.provides
-  // Изначально instance.provides ССЫЛАЕТСЯ на provides родителя (тот же объект).
-  // Когда компонент впервые сам что-то provide'ит, мы создаём ему собственный
-  // объект, наследующий родительский. Так свои ключи не пачкают предка, но
-  // унаследованные по-прежнему видны.
+  // Initially instance.provides REFERENCES the parent's provides (the same object).
+  // The first time a component provides something of its own, we give it its own
+  // object that inherits the parent's. That way its keys don't pollute the
+  // ancestor, but inherited ones remain visible.
   const parentProvides = instance.parent
     ? instance.parent.provides
     : instance.appContext.provides
@@ -36,15 +42,22 @@ export function provide(key, value) {
   provides[key] = value
 }
 
+/**
+ * Inject a value provided by an ancestor (or at the app level). Must be called
+ * inside setup().
+ * @param {string|symbol} key Injection key to look up.
+ * @param {*} [defaultValue] Returned when no provider is found.
+ * @returns {*} The provided value, or `defaultValue` if none exists.
+ */
 export function inject(key, defaultValue) {
   const instance = getCurrentInstance()
   if (!instance) {
-    console.warn('inject() можно вызывать только внутри setup()')
+    console.warn('inject() can only be called inside setup()')
     return defaultValue
   }
 
-  // Ищем среди того, что дали предки (у родителя — вся цепочка через прототип),
-  // либо на уровне приложения (app.provide).
+  // Search what ancestors provided (the parent's provides is the whole chain via
+  // the prototype), or at the app level (app.provide).
   const provides = instance.parent
     ? instance.parent.provides
     : instance.appContext.provides

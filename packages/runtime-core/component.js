@@ -1,9 +1,9 @@
 // ============================================================================
-//  component.js — система компонентов
+//  component.js — the component system
 // ----------------------------------------------------------------------------
-//  Компонент — это переиспользуемая единица «состояние + разметка». В слое 2 мы
-//  вручную связывали ref и render через effect. Компонент оформляет ровно эту
-//  связку как объект, которым можно пользоваться много раз:
+//  A component is a reusable "state + markup" unit. In layer 2 we wired a ref to
+//  a render function by hand via an effect. A component packages exactly that
+//  pairing into an object you can reuse many times:
 //
 //    const Counter = {
 //      props: ['start'],
@@ -12,12 +12,12 @@
 //        return { count, inc: () => count.value++ }
 //      },
 //      render(ctx) {
-//        return h('button', { onClick: ctx.inc }, 'Кликов: ' + ctx.count)
+//        return h('button', { onClick: ctx.inc }, 'Clicks: ' + ctx.count)
 //      },
 //    }
 //
-//  Ниже — как это оживает: как считываются props, как работает setup(), и как
-//  реактивный эффект перерисовывает компонент при изменениях.
+//  Below is how it comes to life: how props are read, how setup() works, and how
+//  a reactive effect re-renders the component when things change.
 // ============================================================================
 
 import { reactive, proxyRefs, ReactiveEffect } from '../reactivity/index.js'
@@ -26,10 +26,10 @@ import { queueJob } from './scheduler.js'
 import { invokeHooks } from './apiLifecycle.js'
 import { BUILTIN_COMPONENTS } from './builtins.js'
 
-// ---- Текущий компонент ----------------------------------------------------
-//  Пока выполняется setup() компонента, ссылка на его инстанс лежит здесь. Так
-//  onMounted / inject / provide, вызванные внутри setup, узнают, к какому
-//  компоненту относятся, не получая его аргументом.
+// ---- Current component -----------------------------------------------------
+//  While a component's setup() runs, a reference to its instance lives here. That
+//  way onMounted / inject / provide, called inside setup, know which component
+//  they belong to without receiving it as an argument.
 let currentInstance = null
 export function getCurrentInstance() {
   return currentInstance
@@ -38,16 +38,16 @@ function setCurrentInstance(instance) {
   currentInstance = instance
 }
 
-// ---- Текущий рендерящийся компонент ---------------------------------------
-//  Пока выполняется код обновления компонента (render + patch его поддерева),
-//  здесь лежит его инстанс. Дочерние компоненты, смонтированные в этот момент,
-//  берут его как родителя — так выстраивается дерево компонентов без передачи
-//  родителя через все вызовы patch.
+// ---- Currently rendering component -----------------------------------------
+//  While a component's update code runs (render + patch of its subtree), its
+//  instance lives here. Child components mounted at that moment take it as their
+//  parent — this is how the component tree is built without threading the parent
+//  through every patch call.
 let currentRenderingInstance = null
 
-// ---- Подключаемый компилятор шаблонов -------------------------------------
-//  Слой 4 зарегистрирует сюда функцию compile(template) → render. Пока её нет,
-//  компонент обязан иметь свою render-функцию или setup, возвращающий render.
+// ---- Pluggable template compiler -------------------------------------------
+//  Layer 4 registers a compile(template) → render function here. Until it exists,
+//  a component must supply its own render function or a setup that returns one.
 let compile = null
 export function registerRuntimeCompiler(fn) {
   compile = fn
@@ -55,16 +55,17 @@ export function registerRuntimeCompiler(fn) {
 
 let uid = 0
 
-// resolveComponent — найти компонент по имени среди зарегистрированных
-// (app.component('RouterView', ...)). Нужен компилятору: тег <RouterView> в
-// шаблоне превращается в _c('RouterView'). Ищем в контексте текущего
-// рендерящегося компонента; не нашли — возвращаем имя как строку (обычный тег).
+// resolveComponent — look up a component by name among the registered ones
+// (app.component('RouterView', ...)). Needed by the compiler: a <RouterView> tag
+// in a template becomes _c('RouterView'). We search in the context of the
+// currently rendering component; if not found, we return the name as a string
+// (a plain tag).
 export function resolveComponent(name) {
-  // Встроенные (Teleport, KeepAlive) — доступны всегда, без регистрации.
+  // Built-ins (Teleport, KeepAlive) are always available, no registration needed.
   if (BUILTIN_COMPONENTS[name]) return BUILTIN_COMPONENTS[name]
   const instance = currentRenderingInstance
   if (instance) {
-    // Сначала локальные (опция components компонента), потом глобальные.
+    // Local first (the component's components option), then global.
     const local = instance.type.components
     if (local && local[name]) return local[name]
     const global = instance.appContext.components
@@ -73,8 +74,8 @@ export function resolveComponent(name) {
   return name
 }
 
-// resolveDirective — найти директиву по имени (app.directive('focus', ...) или
-// локальная directives-опция компонента). Нужна компилятору: v-focus → _dir('focus').
+// resolveDirective — look up a directive by name (app.directive('focus', ...) or
+// a component's local directives option). Needed by the compiler: v-focus → _dir('focus').
 export function resolveDirective(name) {
   const instance = currentRenderingInstance
   if (instance) {
@@ -87,10 +88,10 @@ export function resolveDirective(name) {
 }
 
 // ---------------------------------------------------------------------------
-//  createComponentSystem — фабрика, которую вызывает рендерер через
-//  __installComponents. Получает «внутренности» рендерера (patch, unmount) и
-//  возвращает две функции, которые рендерер вставит в свой patch: как
-//  обрабатывать и как размонтировать компонент.
+//  createComponentSystem — the factory the renderer calls via
+//  __installComponents. It receives the renderer's internals (patch, unmount)
+//  and returns the functions the renderer plugs into its own patch: how to
+//  process and how to unmount a component.
 // ---------------------------------------------------------------------------
 export function createComponentSystem(internals) {
   const { patch, unmount, hydrateNode } = internals
@@ -104,47 +105,47 @@ export function createComponentSystem(internals) {
   }
 
   function mountComponent(vnode, container, anchor) {
-    // 1. Создаём инстанс. Родитель — тот, что сейчас рендерится.
+    // 1. Create the instance. The parent is whatever is rendering right now.
     const instance = (vnode.component = createComponentInstance(
       vnode,
       currentRenderingInstance,
     ))
 
-    // 2. Готовим props, slots и запускаем setup().
+    // 2. Prepare props, slots and run setup().
     setupComponent(instance)
 
-    // 3. Заводим реактивный эффект, который рисует и перерисовывает компонент.
+    // 3. Set up the reactive effect that renders and re-renders the component.
     setupRenderEffect(instance, container, anchor)
   }
 
-  // Гидратация компонента (слой 7): монтируемся «поверх» готового DOM-узла.
+  // Component hydration (layer 7): mount "on top of" an existing DOM node.
   function hydrateComponent(vnode, domNode) {
     const instance = (vnode.component = createComponentInstance(
       vnode,
       currentRenderingInstance,
     ))
     setupComponent(instance)
-    // container для будущих правок — родитель существующего узла; четвёртым
-    // аргументом передаём сам узел как «точку гидратации» первого рендера.
+    // The container for future patches is the existing node's parent; the fourth
+    // argument passes the node itself as the "hydration point" for the first render.
     setupRenderEffect(instance, domNode.parentNode, null, domNode)
   }
 
   function updateComponent(n1, n2) {
-    // Родитель перерисовался и передал компоненту новый vnode (возможно, с
-    // новыми props). Переиспользуем существующий инстанс.
+    // The parent re-rendered and handed the component a new vnode (possibly with
+    // new props). Reuse the existing instance.
     const instance = (n2.component = n1.component)
-    instance.next = n2 // «следующий» vnode обработается перед перерисовкой
-    // Планируем обновление через очередь (дедупликация: даже если props тоже
-    // реактивно дёрнут эффект, компонент перерисуется один раз).
+    instance.next = n2 // the "next" vnode is processed before re-rendering
+    // Queue the update (deduplicated: even if props also reactively trigger the
+    // effect, the component re-renders only once).
     queueJob(instance.update)
   }
 
   function setupRenderEffect(instance, container, anchor, hydrationNode = null) {
-    // Функция одного «прохода» рендера компонента. При первом запуске монтирует
-    // (или гидрирует, если задан hydrationNode), при последующих — обновляет.
+    // The function for a single component render "pass". On the first run it
+    // mounts (or hydrates, if hydrationNode is given), on later runs it updates.
     const componentUpdateFn = () => {
-      // На время рендера и патча поддерева объявляем себя текущим — чтобы
-      // дочерние компоненты взяли нас родителем.
+      // For the duration of rendering and patching the subtree, declare ourselves
+      // current — so child components take us as their parent.
       const prevRendering = currentRenderingInstance
       currentRenderingInstance = instance
       try {
@@ -152,16 +153,16 @@ export function createComponentSystem(internals) {
           invokeHooks(instance.bm) // onBeforeMount
           const subTree = (instance.subTree = renderComponentRoot(instance))
           if (hydrationNode) {
-            // Гидратация: «усыновляем» готовый DOM вместо создания нового.
+            // Hydration: "adopt" existing DOM instead of creating new nodes.
             hydrateNode(hydrationNode, subTree)
           } else {
             patch(null, subTree, container, anchor)
           }
-          instance.vnode.el = subTree.el // корневой узел компонента
+          instance.vnode.el = subTree.el // the component's root node
           instance.isMounted = true
           invokeHooks(instance.m) // onMounted
         } else {
-          // Если пришёл новый vnode от родителя — сначала обновим props/slots.
+          // If a new vnode came from the parent, update props/slots first.
           if (instance.next) {
             updateComponentPreRender(instance, instance.next)
             instance.next = null
@@ -179,19 +180,19 @@ export function createComponentSystem(internals) {
       }
     }
 
-    // Оборачиваем в реактивный эффект. Планировщик — очередь: при изменении
-    // реактивных данных, прочитанных в render, компонент попадёт в очередь на
-    // обновление, а не перерисуется мгновенно.
+    // Wrap it in a reactive effect. The scheduler is a queue: when reactive data
+    // read during render changes, the component is queued for an update rather
+    // than re-rendered immediately.
     const effect = new ReactiveEffect(componentUpdateFn, () => queueJob(instance.update))
 
-    // instance.update — «раннер» эффекта. id нужен планировщику для сортировки
-    // (родитель раньше ребёнка).
+    // instance.update is the effect's "runner". The id lets the scheduler sort
+    // (parent before child).
     const update = (instance.update = effect.run.bind(effect))
     update.id = instance.uid
-    update() // первый запуск = монтирование
+    update() // first run = mount
   }
 
-  // Обновить props и slots перед перерисовкой (данные пришли от родителя).
+  // Update props and slots before re-rendering (data came from the parent).
   function updateComponentPreRender(instance, nextVNode) {
     instance.vnode = nextVNode
     nextVNode.el = instance.subTree ? instance.subTree.el : null
@@ -210,15 +211,15 @@ export function createComponentSystem(internals) {
 }
 
 // ---------------------------------------------------------------------------
-//  createSSRComponent — отрисовать компонент на сервере (слой 7), без DOM.
-//  Создаёт инстанс, выполняет setup и возвращает поддерево VNode. Реактивный
-//  эффект не нужен: на сервере ничего не «живёт», нам важен разовый снимок.
+//  createSSRComponent — render a component on the server (layer 7), without DOM.
+//  Creates an instance, runs setup and returns the VNode subtree. No reactive
+//  effect is needed: nothing "lives" on the server, we just want a one-off snapshot.
 // ---------------------------------------------------------------------------
 export function createSSRComponent(vnode, parent) {
   const instance = createComponentInstance(vnode, parent)
   setupComponent(instance)
   const prev = currentRenderingInstance
-  currentRenderingInstance = instance // чтобы resolveComponent видел контекст
+  currentRenderingInstance = instance // so resolveComponent sees the context
   try {
     const subTree = renderComponentRoot(instance)
     return { instance, subTree }
@@ -228,28 +229,28 @@ export function createSSRComponent(vnode, parent) {
 }
 
 // ---------------------------------------------------------------------------
-//  createComponentInstance — «личное дело» компонента: всё его состояние.
+//  createComponentInstance — a component's "personal record": all of its state.
 // ---------------------------------------------------------------------------
 function createComponentInstance(vnode, parent) {
   const appContext = parent ? parent.appContext : vnode.appContext || defaultAppContext
   const instance = {
     uid: uid++,
     vnode,
-    type: vnode.type, // объект-описание компонента
+    type: vnode.type, // the component definition object
     parent,
     appContext,
-    // provides наследует родительские (или общеприложенческие) — см. apiInject.
+    // provides inherits from the parent (or app-level) — see apiInject.
     provides: parent ? parent.provides : appContext.provides,
     propsOptions: normalizePropsOptions(vnode.type.props),
     props: {},
     attrs: {},
     slots: {},
     setupState: {},
-    ctx: null, // публичный прокси для render
-    subTree: null, // последнее отрисованное дерево
+    ctx: null, // public proxy for render
+    subTree: null, // last rendered tree
     isMounted: false,
-    next: null, // следующий vnode при обновлении сверху
-    update: null, // раннер реактивного эффекта
+    next: null, // next vnode on an update from above
+    update: null, // reactive effect runner
     render: null,
     emit: null,
   }
@@ -257,17 +258,17 @@ function createComponentInstance(vnode, parent) {
   return instance
 }
 
-// Подготовить компонент к работе: props, slots, setup.
+// Get a component ready to run: props, slots, setup.
 function setupComponent(instance) {
   initProps(instance)
   updateSlots(instance, instance.vnode.children)
   setupStatefulComponent(instance)
 }
 
-// Обновить слоты, СОХРАНИВ ссылку на объект instance.slots. Это важно: setup мог
-// захватить slots в замыкание (например, KeepAlive возвращает () => slots.default()).
-// Если переприсвоить instance.slots новым объектом, замыкание увидит старый.
-// Поэтому переносим содержимое в тот же объект.
+// Update slots while KEEPING the same instance.slots object reference. This
+// matters: setup may have captured slots in a closure (e.g. KeepAlive returns
+// () => slots.default()). Reassigning instance.slots to a new object would leave
+// the closure looking at the old one. So we move the contents into the same object.
 function updateSlots(instance, children) {
   const normalized = normalizeSlots(children)
   for (const key in instance.slots) delete instance.slots[key]
@@ -277,13 +278,13 @@ function updateSlots(instance, children) {
 function setupStatefulComponent(instance) {
   const Component = instance.type
 
-  // Публичный контекст: то, что доступно в render как ctx / this. Проксируем
-  // доступ так, чтобы ctx.count лез в setupState, а ctx.someProp — в props.
+  // Public context: what render sees as ctx / this. We proxy access so that
+  // ctx.count reaches into setupState, and ctx.someProp into props.
   instance.ctx = new Proxy(instance, PublicInstanceHandlers)
 
   const { setup } = Component
   if (setup) {
-    // На время setup объявляем инстанс текущим (для onMounted/inject/provide).
+    // For the duration of setup, declare the instance current (for onMounted/inject/provide).
     setCurrentInstance(instance)
     const setupContext = {
       emit: instance.emit,
@@ -294,11 +295,11 @@ function setupStatefulComponent(instance) {
     setCurrentInstance(null)
 
     if (typeof setupResult === 'function') {
-      // setup вернул render-функцию — используем её.
+      // setup returned a render function — use it.
       instance.render = setupResult
     } else if (setupResult && typeof setupResult === 'object') {
-      // setup вернул объект состояния. proxyRefs разворачивает .value, чтобы в
-      // шаблоне писать count, а не count.value.
+      // setup returned a state object. proxyRefs unwraps .value so the template
+      // can write count instead of count.value.
       instance.setupState = proxyRefs(setupResult)
     }
   }
@@ -312,29 +313,29 @@ function finishComponentSetup(instance) {
     if (Component.render) {
       instance.render = Component.render
     } else if (Component.template && compile) {
-      // Компилятор из слоя 4 превратит строку-шаблон в render-функцию.
+      // The compiler from layer 4 turns a template string into a render function.
       instance.render = compile(Component.template)
     } else {
       instance.render = () => {
-        console.warn('У компонента нет ни render, ни template (или компилятор не подключён)')
+        console.warn('Component has neither render nor template (or the compiler is not installed)')
         return null
       }
     }
   }
 }
 
-// Вызвать render в контексте компонента и нормализовать результат в VNode.
+// Call render in the component's context and normalize the result to a VNode.
 function renderComponentRoot(instance) {
   const { render, ctx } = instance
-  // this = ctx (для render(){ return h(..., this.count) }) и первым аргументом
-  // тоже ctx (для стрелочного render(ctx){ ... }). Оба стиля работают.
+  // this = ctx (for render(){ return h(..., this.count) }) and the first argument
+  // is also ctx (for the arrow-style render(ctx){ ... }). Both styles work.
   return normalizeVNode(render.call(ctx, ctx))
 }
 
 // ---- props ----------------------------------------------------------------
-// Компонент объявляет, какие props он принимает (props: ['start'] или объект).
-// Всё, что пришло в его props, но не объявлено, считается «сквозным» атрибутом
-// (attrs) — например, class, повешенный на компонент снаружи.
+// A component declares which props it accepts (props: ['start'] or an object).
+// Anything that arrives in its props but is not declared is treated as a
+// fall-through attribute (attrs) — e.g. a class set on the component from outside.
 function normalizePropsOptions(raw) {
   if (!raw) return new Set()
   if (Array.isArray(raw)) return new Set(raw)
@@ -351,8 +352,8 @@ function initProps(instance) {
     if (options.has(key)) props[key] = raw[key]
     else attrs[key] = raw[key]
   }
-  // props делаем реактивными: если родитель передаст новое значение, компонент,
-  // читавший props в render/computed/watch, отреагирует.
+  // Make props reactive: if the parent passes a new value, a component that read
+  // props in render/computed/watch will react.
   instance.props = reactive(props)
   instance.attrs = attrs
 }
@@ -361,21 +362,21 @@ function updateProps(instance, nextVNode) {
   const raw = nextVNode.props || {}
   const options = instance.propsOptions
   const props = instance.props
-  // Обновляем и добавляем.
+  // Update and add.
   for (const key in raw) {
     if (key === 'key') continue
     if (options.has(key)) props[key] = raw[key]
     else instance.attrs[key] = raw[key]
   }
-  // Удаляем объявленные props, которых больше не передают.
+  // Remove declared props that are no longer passed.
   for (const key in props) {
     if (!(key in raw)) delete props[key]
   }
 }
 
 // ---- emit -----------------------------------------------------------------
-// Компонент «кричит наверх» о событии: emit('increment'). Родитель слушает его
-// как onIncrement. Поэтому emit ищет в props компонента обработчик onXxx.
+// A component "shouts up" about an event: emit('increment'). The parent listens
+// to it as onIncrement. So emit looks for an onXxx handler in the component's props.
 function emit(instance, event, ...args) {
   const handlerName = 'on' + event[0].toUpperCase() + event.slice(1)
   const handler = instance.vnode.props && instance.vnode.props[handlerName]
@@ -383,9 +384,9 @@ function emit(instance, event, ...args) {
 }
 
 // ---- slots ----------------------------------------------------------------
-// Слот — «дырка», куда родитель кладёт свою разметку. Дети компонента и есть
-// его слоты. Массив/строка → слот по умолчанию (default). Объект → именованные
-// слоты { header: () => ..., footer: () => ... }.
+// A slot is a "hole" where the parent drops its own markup. A component's children
+// are its slots. Array/string → the default slot. Object → named slots
+// { header: () => ..., footer: () => ... }.
 function normalizeSlots(children) {
   if (children == null) return {}
   if (Array.isArray(children)) {
@@ -402,9 +403,9 @@ function normalizeSlots(children) {
   return { default: () => [normalizeVNode(children)] }
 }
 
-// ---- публичный прокси контекста -------------------------------------------
-// Определяет, что видно в render как ctx.<что-то>. Порядок поиска: сначала
-// состояние из setup, потом props, потом служебные $-свойства.
+// ---- public context proxy --------------------------------------------------
+// Defines what render sees as ctx.<something>. Lookup order: state from setup
+// first, then props, then the built-in $ properties.
 const PublicInstanceHandlers = {
   get(instance, key) {
     const { setupState, props } = instance
@@ -414,7 +415,7 @@ const PublicInstanceHandlers = {
     if (props && key in props) {
       return props[key]
     }
-    // Служебные свойства, как $emit во Vue.
+    // Built-in properties, like $emit in Vue.
     switch (key) {
       case '$emit':
         return instance.emit
@@ -427,7 +428,7 @@ const PublicInstanceHandlers = {
       case '$el':
         return instance.vnode.el
     }
-    // Глобальные свойства приложения (например, $router/$route от плагинов).
+    // App-level global properties (e.g. $router/$route from plugins).
     const globalProps = instance.appContext.config.globalProperties
     if (globalProps && key in globalProps) {
       return globalProps[key]
@@ -437,14 +438,14 @@ const PublicInstanceHandlers = {
   set(instance, key, value) {
     const { setupState } = instance
     if (setupState && Object.prototype.hasOwnProperty.call(setupState, key)) {
-      setupState[key] = value // proxyRefs запишет в ref.value
+      setupState[key] = value // proxyRefs writes into ref.value
       return true
     }
     return true
   },
-  // has нужен для with(ctx) в скомпилированных шаблонах (слой 4). with спрашивает
-  // «есть ли идентификатор в ctx?»: для состояния/props отвечаем «да» (берём из
-  // ctx), для h/_s/Fragment — «нет» (они придут из внешней области генератора).
+  // has is needed for with(ctx) in compiled templates (layer 4). with asks "does
+  // ctx have this identifier?": for state/props we answer "yes" (take it from ctx),
+  // for h/_s/Fragment "no" (they come from the generator's outer scope).
   has(instance, key) {
     const { setupState, props } = instance
     return (
@@ -455,8 +456,8 @@ const PublicInstanceHandlers = {
   },
 }
 
-// Контекст приложения по умолчанию — на случай vnode без привязки к createApp
-// (например, при прямом рендере компонента в тестах).
+// The default app context — for a vnode not tied to a createApp (e.g. when
+// rendering a component directly in tests).
 export const defaultAppContext = {
   provides: Object.create(null),
   components: Object.create(null),

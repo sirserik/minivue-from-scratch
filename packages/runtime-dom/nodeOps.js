@@ -1,47 +1,52 @@
 // ============================================================================
-//  nodeOps.js — операции над реальными узлами браузера
+//  nodeOps.js — operations on real browser nodes
 // ----------------------------------------------------------------------------
-//  Рендерер (renderer.js) сам ничего не знает про DOM. Все конкретные действия
-//  «создай элемент», «вставь», «удали» он берёт отсюда. Заменив этот файл на
-//  другой (например, на выдуманное дерево), тот же рендерер заработает в другой
-//  среде — этим мы воспользуемся и в тестах, и на сервере (SSR).
+//  The renderer (renderer.js) knows nothing about the DOM itself. Every
+//  concrete action — "create an element", "insert", "remove" — it takes from
+//  here. Swap this file for another one (for example, a made-up tree) and the
+//  same renderer will run in a different environment — which we rely on in both
+//  tests and on the server (SSR).
 // ============================================================================
 
+/**
+ * Browser DOM node operations passed to the platform-agnostic renderer.
+ * @type {object}
+ */
 export const nodeOps = {
-  // Создать элемент по имени тега: 'div' → <div>.
+  // Create an element from a tag name: 'div' → <div>.
   createElement(tag) {
     return document.createElement(tag)
   },
 
-  // Создать текстовый узел.
+  // Create a text node.
   createText(text) {
     return document.createTextNode(text)
   },
 
-  // Заменить текст в текстовом узле.
+  // Replace the text of a text node.
   setText(node, text) {
     node.nodeValue = text
   },
 
-  // Задать текстовое содержимое элемента (стирает прежних детей).
+  // Set the element's text content (wipes existing children).
   setElementText(el, text) {
     el.textContent = text
   },
 
-  // Вставить child внутрь parent перед anchor. Если anchor === null —
-  // insertBefore(child, null) работает как «добавить в конец». Удобно: одна
-  // операция и для вставки в середину, и в конец.
+  // Insert child into parent before anchor. When anchor === null,
+  // insertBefore(child, null) behaves as "append to the end". Handy: a single
+  // operation covers both inserting in the middle and at the end.
   insert(child, parent, anchor = null) {
     parent.insertBefore(child, anchor)
   },
 
-  // Удалить узел из его родителя.
+  // Remove a node from its parent.
   remove(child) {
     const parent = child.parentNode
     if (parent) parent.removeChild(child)
   },
 
-  // Соседний справа узел — нужен как якорь при перемещениях.
+  // The next sibling node — needed as an anchor when moving nodes.
   nextSibling(node) {
     return node.nextSibling
   },
@@ -50,7 +55,7 @@ export const nodeOps = {
     return node.parentNode
   },
 
-  // Найти элемент по селектору — нужно Teleport'у для строкового to="#modals".
+  // Find an element by selector — needed by Teleport for a string to="#modals".
   querySelector(selector) {
     return document.querySelector(selector)
   },

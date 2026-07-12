@@ -1,15 +1,15 @@
 // ============================================================================
-//  ref.js — реактивная обёртка для одного значения
+//  ref.js — a reactive wrapper around a single value
 // ----------------------------------------------------------------------------
-//  Proxy умеет отслеживать только СВОЙСТВА объекта. А как сделать реактивным
-//  простое число или строку? Никак — у примитива нет свойств, которые можно
-//  перехватить. Решение: положить значение внутрь объекта в свойство .value и
-//  отслеживать чтение/запись именно этого .value.
+//  A Proxy can only track the PROPERTIES of an object. So how do we make a
+//  plain number or string reactive? We can't — a primitive has no properties
+//  to intercept. The solution: put the value inside an object under a .value
+//  property and track reads/writes of that .value.
 //
-//  Поэтому у ref всегда обращаются через .value:
+//  That is why a ref is always accessed through .value:
 //    const count = ref(0)
-//    count.value++        // запись → trigger
-//    console.log(count.value)  // чтение → track
+//    count.value++             // write → trigger
+//    console.log(count.value)  // read  → track
 // ============================================================================
 
 import { trackEffects, triggerEffects, activeEffect } from './effect.js'
@@ -17,29 +17,29 @@ import { reactive, isObject, hasChanged, toRaw } from './reactive.js'
 
 class RefImpl {
   constructor(value) {
-    // Если внутрь ref положили объект — оборачиваем его в reactive, чтобы
-    // вложенные свойства тоже были реактивными. Примитивы храним как есть.
+    // If an object was put inside the ref, wrap it in reactive so its nested
+    // properties are reactive too. Primitives are stored as-is.
     this._value = convert(value)
-    this._rawValue = value // исходное значение для сравнения при записи
-    // Собственный набор эффектов этого ref (аналог dep из targetMap, но ref
-    // хранит его прямо в себе — у него всего одно «свойство» value).
+    this._rawValue = value // raw value kept for comparison on write
+    // This ref's own set of effects (the equivalent of a dep from targetMap,
+    // but a ref keeps it directly on itself — it has only one "property", value).
     this.dep = new Set()
     this.__isRef = true
   }
 
   get value() {
-    // Чтение .value — момент, когда надо связать активный эффект с этим ref.
+    // Reading .value is the moment to link the active effect to this ref.
     if (activeEffect) trackEffects(this.dep)
     return this._value
   }
 
   set value(newValue) {
-    // Сравниваем с «сырым» старым значением (без reactive-обёртки), иначе
-    // сравнение объекта с его Proxy всегда давало бы «изменилось».
+    // Compare against the "raw" old value (without the reactive wrapper),
+    // otherwise comparing an object with its Proxy would always look "changed".
     if (hasChanged(toRaw(newValue), this._rawValue)) {
       this._rawValue = toRaw(newValue)
       this._value = convert(newValue)
-      // Значение поменялось — будим все эффекты, читавшие этот ref.
+      // The value changed — wake up every effect that read this ref.
       triggerEffects(this.dep)
     }
   }
@@ -49,15 +49,21 @@ function convert(value) {
   return isObject(value) ? reactive(value) : value
 }
 
+/**
+ * Creates a reactive reference around a single value, accessed via `.value`.
+ * If the value is an object, it is made deeply reactive.
+ * @param {*} value - The initial value (primitive or object).
+ * @returns {RefImpl} A ref; returns the argument unchanged if it is already a ref.
+ */
 export function ref(value) {
-  // Уже ref — не оборачиваем повторно.
+  // Already a ref — don't wrap it again.
   if (isRef(value)) return value
   return new RefImpl(value)
 }
 
-// shallowRef — как ref, но НЕ делает содержимое реактивным и реагирует только на
-// замену самого .value целиком (не на изменение полей объекта внутри). Полезно
-// для больших объектов, которые вы меняете заменой, а не мутацией.
+// shallowRef — like ref, but does NOT make its contents reactive and reacts
+// only to replacing the whole .value (not to mutating fields of the inner
+// object). Useful for large objects you change by replacement, not mutation.
 class ShallowRefImpl {
   constructor(value) {
     this._value = value
@@ -76,32 +82,50 @@ class ShallowRefImpl {
   }
 }
 
+/**
+ * Creates a shallow ref: only replacing `.value` is tracked, not mutations of
+ * the inner object.
+ * @param {*} value - The initial value.
+ * @returns {ShallowRefImpl} A shallow ref.
+ */
 export function shallowRef(value) {
   return new ShallowRefImpl(value)
 }
 
-// triggerRef — вручную «дёрнуть» shallowRef, если вы всё-таки изменили поле
-// внутри его значения и хотите оповестить подписчиков.
+/**
+ * Manually triggers effects that depend on a shallowRef, for cases where you
+ * mutated a field inside its value and want to notify subscribers.
+ * @param {object} ref - The ref whose dependents should be re-run.
+ */
 export function triggerRef(ref) {
   if (ref && ref.dep) triggerEffects(ref.dep)
 }
 
+/**
+ * Checks whether a value is a ref.
+ * @param {*} value - The value to test.
+ * @returns {boolean} True if the value is a ref.
+ */
 export function isRef(value) {
   return !!(value && value.__isRef === true)
 }
 
-// unref(x): если x — ref, вернуть x.value, иначе сам x. Удобно, когда значение
-// может прийти и как ref, и как обычное.
+/**
+ * Returns the inner value of a ref, or the value itself if it is not a ref.
+ * Handy when a value may arrive either as a ref or as a plain value.
+ * @param {*} value - A ref or a plain value.
+ * @returns {*} `value.value` if it is a ref, otherwise `value`.
+ */
 export function unref(value) {
   return isRef(value) ? value.value : value
 }
 
 // ---------------------------------------------------------------------------
-//  toRef / toRefs — «мостик» между reactive-объектом и ref.
-//  Проблема: если из reactive-объекта достать свойство обычной деструктуризацией
-//  (const { count } = state), связь с реактивностью теряется — count станет
-//  просто числом. toRef создаёт ref, который читает/пишет прямо в исходный
-//  объект, сохраняя реактивную связь.
+//  toRef / toRefs — a "bridge" between a reactive object and a ref.
+//  The problem: pulling a property off a reactive object with plain
+//  destructuring (const { count } = state) breaks the reactive link — count
+//  becomes just a number. toRef creates a ref that reads/writes straight into
+//  the source object, preserving the reactive connection.
 // ---------------------------------------------------------------------------
 class ObjectRefImpl {
   constructor(object, key) {
@@ -110,7 +134,7 @@ class ObjectRefImpl {
     this.__isRef = true
   }
   get value() {
-    // Чтение идёт через reactive-объект, поэтому track произойдёт сам собой.
+    // The read goes through the reactive object, so track happens on its own.
     return this._object[this._key]
   }
   set value(newValue) {
@@ -118,10 +142,23 @@ class ObjectRefImpl {
   }
 }
 
+/**
+ * Creates a ref bound to a single property of a reactive object, keeping the
+ * reactive link even after the property is extracted.
+ * @param {object} object - The source reactive object.
+ * @param {string|symbol} key - The property to bind to.
+ * @returns {ObjectRefImpl} A ref that reads/writes `object[key]`.
+ */
 export function toRef(object, key) {
   return new ObjectRefImpl(object, key)
 }
 
+/**
+ * Converts a reactive object into a plain object (or array) whose every
+ * property is a ref bound to the original, so it survives destructuring.
+ * @param {object|Array} object - The source reactive object or array.
+ * @returns {object|Array} An object/array of refs mirroring the source keys.
+ */
 export function toRefs(object) {
   const result = Array.isArray(object) ? new Array(object.length) : {}
   for (const key in object) {
@@ -131,22 +168,28 @@ export function toRefs(object) {
 }
 
 // ---------------------------------------------------------------------------
-//  proxyRefs — «автоматическая распаковка .value».
-//  Внутри шаблонов Vue пишут {{ count }}, а не {{ count.value }}. Этого удобства
-//  добивается proxyRefs: он оборачивает объект так, что при чтении свойства-ref
-//  автоматически возвращается .value, а при записи — присваивается в .value.
-//  Именно это позже применит слой компонентов к результату setup().
+//  proxyRefs — "automatic .value unwrapping".
+//  Inside Vue templates you write {{ count }}, not {{ count.value }}. proxyRefs
+//  provides that convenience: it wraps an object so that reading a ref property
+//  automatically returns its .value, and writing assigns into that .value.
+//  This is exactly what the components layer later applies to the setup() result.
 // ---------------------------------------------------------------------------
+/**
+ * Wraps an object so that ref properties are automatically unwrapped on read
+ * and assigned into their `.value` on write.
+ * @param {object} objectWithRefs - An object that may contain refs.
+ * @returns {Proxy} A proxy that transparently unwraps its ref properties.
+ */
 export function proxyRefs(objectWithRefs) {
   return new Proxy(objectWithRefs, {
     get(target, key, receiver) {
-      // Читаем свойство и, если это ref, сразу разворачиваем в значение.
+      // Read the property and, if it is a ref, unwrap it to its value.
       return unref(Reflect.get(target, key, receiver))
     },
     set(target, key, value, receiver) {
       const oldValue = target[key]
-      // Если на месте лежит ref, а присваивают не-ref — пишем в его .value,
-      // сохраняя реактивность. Иначе — обычная запись.
+      // If a ref sits there and a non-ref is being assigned, write into its
+      // .value to preserve reactivity. Otherwise do a plain write.
       if (isRef(oldValue) && !isRef(value)) {
         oldValue.value = value
         return true

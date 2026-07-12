@@ -1,4 +1,4 @@
-// Тесты слоя 12: $patch / $subscribe / $reset.
+// Layer 12 tests: $patch / $subscribe / $reset.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
@@ -14,7 +14,7 @@ const useCounter = defineStore('counter', {
   },
 })
 
-test('$patch объектом и функцией', () => {
+test('$patch with an object and a function', () => {
   setActivePinia(createPinia())
   const store = useCounter()
   store.$patch({ count: 5 })
@@ -27,7 +27,7 @@ test('$patch объектом и функцией', () => {
   assert.equal(store.name, 'y')
 })
 
-test('$subscribe вызывается при изменении', () => {
+test('$subscribe is called on change', () => {
   setActivePinia(createPinia())
   const store = useCounter()
   let calls = 0
@@ -37,7 +37,7 @@ test('$subscribe вызывается при изменении', () => {
   assert.equal(calls, 2)
 })
 
-test('$reset возвращает начальное состояние', () => {
+test('$reset restores the initial state', () => {
   setActivePinia(createPinia())
   const store = useCounter()
   store.$patch({ count: 42, name: 'z' })
@@ -46,7 +46,7 @@ test('$reset возвращает начальное состояние', () => 
   assert.equal(store.name, 'x')
 })
 
-test('$patch и $subscribe на setup-сторе', () => {
+test('$patch and $subscribe on a setup store', () => {
   const useCart = defineStore('cart', () => {
     const items = ref([])
     const total = computed(() => items.value.reduce((s, p) => s + p, 0))
@@ -63,7 +63,7 @@ test('$patch и $subscribe на setup-сторе', () => {
   assert.equal(notified, 1)
 })
 
-test('$reset на setup-сторе предупреждает', () => {
+test('$reset on a setup store warns', () => {
   const useThing = defineStore('thing', () => ({ x: ref(1) }))
   setActivePinia(createPinia())
   const store = useThing()

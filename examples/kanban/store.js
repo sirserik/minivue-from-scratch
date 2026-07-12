@@ -1,30 +1,30 @@
 // ============================================================================
-//  store.js — стор доски MiniTrello (аналог Pinia, setup-стиль)
+//  store.js — MiniTrello board store (Pinia-like, setup style)
 // ----------------------------------------------------------------------------
-//  Единственный источник правды для всего приложения: карточки и колонки.
-//  Компоненты (доска, модалка, архив, статистика) читают и меняют только его.
+//  The single source of truth for the whole app: cards and columns.
+//  Components (board, modal, archive, stats) only read and mutate this store.
 // ============================================================================
 import { defineStore } from '../../packages/store/index.js'
 import { ref, computed, watchEffect } from '../../packages/runtime-core/index.js'
 
 const STORAGE_KEY = 'minitrello'
 
-// Начальные карточки (если в localStorage ничего нет).
+// Initial cards (used when there's nothing in localStorage).
 const seed = () => [
-  { id: 1, title: 'Сверстать шапку', columnId: 'todo', priority: 'high', done: false, archived: false },
-  { id: 2, title: 'Написать тесты', columnId: 'todo', priority: 'normal', done: false, archived: false },
-  { id: 3, title: 'Ревью PR', columnId: 'doing', priority: 'normal', done: false, archived: false },
-  { id: 4, title: 'Настроить проект', columnId: 'done', priority: 'low', done: true, archived: false },
+  { id: 1, title: 'Design the header', columnId: 'todo', priority: 'high', done: false, archived: false },
+  { id: 2, title: 'Write tests', columnId: 'todo', priority: 'normal', done: false, archived: false },
+  { id: 3, title: 'Review PR', columnId: 'doing', priority: 'normal', done: false, archived: false },
+  { id: 4, title: 'Set up the project', columnId: 'done', priority: 'low', done: true, archived: false },
 ]
 
 export const useBoard = defineStore('board', () => {
   const columns = [
-    { id: 'todo', name: 'Надо' },
-    { id: 'doing', name: 'В работе' },
-    { id: 'done', name: 'Готово' },
+    { id: 'todo', name: 'To do' },
+    { id: 'doing', name: 'In progress' },
+    { id: 'done', name: 'Done' },
   ]
 
-  // Загружаем из localStorage, если есть (в браузере), иначе — начальные данные.
+  // Load from localStorage if present (in the browser), otherwise seed data.
   let initial = seed()
   let maxId = 4
   if (typeof localStorage !== 'undefined') {
@@ -32,31 +32,31 @@ export const useBoard = defineStore('board', () => {
     if (saved) {
       try {
         const parsed = JSON.parse(saved)
-        // Принимаем ТОЛЬКО непустой массив карточек. Иначе (пустой массив, не
-        // массив, битый JSON) откатываемся на начальные данные — иначе
-        // items.value.filter(...) в computed упал бы и обнулил всю страницу.
+        // Accept ONLY a non-empty array of cards. Otherwise (empty array, not
+        // an array, corrupted JSON) fall back to the seed data — otherwise
+        // items.value.filter(...) in a computed would throw and blank the page.
         if (Array.isArray(parsed) && parsed.length > 0) {
           initial = parsed
           maxId = initial.reduce((m, c) => Math.max(m, Number(c.id) || 0), 0)
         }
       } catch {
-        /* битые данные — оставим seed */
+        /* corrupted data — keep the seed */
       }
     }
   }
   let nextId = maxId + 1
   const items = ref(initial)
 
-  // --- производные значения (computed) -------------------------------------
+  // --- derived values (computed) -------------------------------------------
   const active = computed(() => items.value.filter((c) => !c.archived))
   const archivedCards = computed(() => items.value.filter((c) => c.archived))
   const count = computed(() => active.value.length)
 
-  // --- «геттеры»-функции ---------------------------------------------------
+  // --- "getter" functions --------------------------------------------------
   const byColumn = (colId) => active.value.filter((c) => c.columnId === colId)
   const byId = (id) => items.value.find((c) => c.id === Number(id))
 
-  // --- действия (мутируют состояние заменой массива) -----------------------
+  // --- actions (mutate state by replacing the array) -----------------------
   const add = (title, columnId = 'todo') => {
     items.value = [
       ...items.value,
@@ -74,8 +74,8 @@ export const useBoard = defineStore('board', () => {
   const restore = (id) => update(id, { archived: false })
   const toggleDone = (id) => update(id, { done: !byId(id).done })
 
-  // Персистентность: watchEffect читает items.value и сохраняет при каждом
-  // изменении. В Node (тесты, SSR) localStorage нет — тогда просто ничего не пишем.
+  // Persistence: watchEffect reads items.value and saves on every change.
+  // In Node (tests, SSR) there is no localStorage — then we simply write nothing.
   watchEffect(() => {
     if (typeof localStorage !== 'undefined') {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(items.value))

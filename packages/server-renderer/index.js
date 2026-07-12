@@ -1,26 +1,29 @@
 // ============================================================================
-//  server-renderer — рендеринг в HTML-строку на сервере (SSR)
+//  server-renderer — rendering to an HTML string on the server (SSR)
 // ----------------------------------------------------------------------------
-//  До сих пор мы рисовали в DOM браузера. Но тот же VNode-дерево можно превратить
-//  не в узлы, а в текст — готовую HTML-строку. Сервер отдаёт её сразу, и
-//  пользователь видит содержимое мгновенно, ещё до загрузки JavaScript. Это и есть
-//  SSR (server-side rendering): быстрый первый экран и индексируемость поисковиками.
+//  So far we've been drawing into the browser DOM. But the same VNode tree can
+//  be turned not into nodes but into text — a ready HTML string. The server
+//  sends it right away, and the user sees the content instantly, even before
+//  JavaScript loads. That's SSR (server-side rendering): a fast first paint and
+//  indexability by search engines.
 //
-//  Здесь нет ни DOM, ни реактивного эффекта — только обход дерева и склейка строк.
-//  «Оживление» этой строки на клиенте (гидратация) живёт в рендерере (слой 7),
-//  функция hydrate.
+//  There's no DOM and no reactive effect here — just tree traversal and string
+//  concatenation. "Bringing this string to life" on the client (hydration) lives
+//  in the renderer (layer 7), the hydrate function.
 // ============================================================================
 
 import { Text, Fragment, createVNode, normalizeVNode } from '../runtime-core/vnode.js'
 import { createSSRComponent, createAppContext } from '../runtime-core/component.js'
 import { normalizeClass, styleToString } from '../shared.js'
 
-// Теги без содержимого и закрывающего тега.
+// Void tags: no content and no closing tag.
 const VOID_TAGS = new Set(['br', 'hr', 'img', 'input', 'meta', 'link'])
 
-// ---------------------------------------------------------------------------
-//  renderToString(vnode) — превратить VNode-дерево в HTML-строку.
-// ---------------------------------------------------------------------------
+/**
+ * Render a VNode tree into an HTML string.
+ * @param {object} vnode - The root VNode.
+ * @returns {string} The serialized HTML.
+ */
 export function renderToString(vnode) {
   return renderVNode(normalizeVNode(vnode), null)
 }
@@ -39,8 +42,8 @@ function renderVNode(vnode, parentComponent) {
     return renderElement(vnode, parentComponent)
   }
   if (typeof type === 'object' || typeof type === 'function') {
-    // Компонент: на сервере создаём инстанс, выполняем setup, получаем поддерево
-    // и рекурсивно его сериализуем.
+    // Component: on the server we create an instance, run setup, get the subtree
+    // and serialize it recursively.
     const { instance, subTree } = createSSRComponent(vnode, parentComponent)
     return renderVNode(subTree, instance)
   }
@@ -50,7 +53,7 @@ function renderVNode(vnode, parentComponent) {
 function renderElement(vnode, parentComponent) {
   const { type: tag, props, children } = vnode
   const open = `<${tag}${renderAttrs(props)}>`
-  if (VOID_TAGS.has(tag)) return open // <input ...> без закрытия
+  if (VOID_TAGS.has(tag)) return open // <input ...> with no closing tag
   return open + renderChildren(children, parentComponent) + `</${tag}>`
 }
 
@@ -65,13 +68,13 @@ function renderChildren(children, parentComponent) {
   return ''
 }
 
-// Сериализация атрибутов. События (onClick) в HTML не выводим — они навесятся
-// на клиенте при гидратации. class/style/булевы обрабатываем особо.
+// Serialize attributes. Events (onClick) are not emitted into HTML — they get
+// attached on the client during hydration. class/style/booleans are special-cased.
 function renderAttrs(props) {
   let out = ''
   for (const key in props) {
     if (key === 'key') continue
-    if (/^on[A-Z]/.test(key)) continue // обработчики событий — только на клиенте
+    if (/^on[A-Z]/.test(key)) continue // event handlers — client-only
     const value = props[key]
     if (value == null || value === false) continue
 
@@ -82,7 +85,7 @@ function renderAttrs(props) {
       const style = styleToString(value)
       if (style) out += ` style="${escapeAttr(style)}"`
     } else if (value === true) {
-      out += ` ${key}` // булев атрибут: <input disabled>
+      out += ` ${key}` // boolean attribute: <input disabled>
     } else {
       out += ` ${key}="${escapeAttr(String(value))}"`
     }
@@ -90,7 +93,7 @@ function renderAttrs(props) {
   return out
 }
 
-// Экранирование, чтобы данные пользователя не ломали разметку и не давали XSS.
+// Escape so user data can't break the markup or open an XSS hole.
 function escapeHtml(value) {
   return String(value == null ? '' : value)
     .replace(/&/g, '&amp;')
@@ -102,16 +105,20 @@ function escapeAttr(value) {
   return String(value).replace(/&/g, '&amp;').replace(/"/g, '&quot;')
 }
 
-// ---------------------------------------------------------------------------
-//  createSSRApp — как createApp, но вместо mount отдаёт HTML-строку. Плагины
-//  (router, pinia) подключаются так же через use().
-// ---------------------------------------------------------------------------
+/**
+ * Like createApp, but instead of mounting it returns an HTML string. Plugins
+ * (router, pinia) are installed the same way via use().
+ * @param {object|Function} rootComponent - The root component.
+ * @param {object|null} [rootProps] - Props for the root component.
+ * @returns {object} An SSR app instance exposing use/provide/component/directive
+ *   and renderToString().
+ */
 export function createSSRApp(rootComponent, rootProps = null) {
   const context = createAppContext()
 
   const app = {
     _context: context,
-    config: context.config, // для плагинов: app.config.globalProperties
+    config: context.config, // for plugins: app.config.globalProperties
     use(plugin, ...options) {
       if (plugin && typeof plugin.install === 'function') plugin.install(app, ...options)
       else if (typeof plugin === 'function') plugin(app, ...options)

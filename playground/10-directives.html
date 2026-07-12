@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="ru">
+<html lang="en">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>MiniVue · Слой 10: Директивы и динамические компоненты</title>
+    <title>MiniVue · Layer 10: Directives and Dynamic Components</title>
     <style>
       body { font-family: -apple-system, system-ui, sans-serif; max-width: 640px; margin: 40px auto; padding: 0 20px; line-height: 1.6; }
       h1 { font-size: 22px; }
@@ -16,22 +16,22 @@
     </style>
   </head>
   <body>
-    <h1>MiniVue · Слой 10: Директивы и динамические компоненты</h1>
+    <h1>MiniVue · Layer 10: Directives and Dynamic Components</h1>
     <p class="muted">
-      <code>v-focus</code> — кастомная директива (фокусирует поле при появлении).
-      Вкладки — <code>&lt;component :is&gt;</code>, переключающий компонент.
-      <code>MoneyInput</code> — компонент с <code>v-model</code>.
+      <code>v-focus</code> is a custom directive (focuses the field on appear).
+      The tabs use <code>&lt;component :is&gt;</code> to switch the rendered component.
+      <code>MoneyInput</code> is a component with <code>v-model</code>.
     </p>
     <div id="app"></div>
 
     <script type="module">
       import { createApp, ref, shallowRef, computed } from '../packages/minivue.js'
 
-      // Вкладки-компоненты.
-      const TabProfile = { template: '<div class="card">Профиль пользователя.</div>' }
-      const TabSettings = { template: '<div class="card">Настройки приложения.</div>' }
+      // Tab components.
+      const TabProfile = { template: '<div class="card">User profile.</div>' }
+      const TabSettings = { template: '<div class="card">Application settings.</div>' }
 
-      // Компонент с v-model: поле суммы.
+      // Component with v-model: an amount field.
       const MoneyInput = {
         props: ['modelValue'],
         setup(props, { emit }) {
@@ -45,8 +45,8 @@
         setup() {
           const tab = shallowRef(TabProfile)
           const tabs = [
-            { name: 'Профиль', comp: TabProfile },
-            { name: 'Настройки', comp: TabSettings },
+            { name: 'Profile', comp: TabProfile },
+            { name: 'Settings', comp: TabSettings },
           ]
           const amount = ref(1000)
           const withTax = computed(() => Math.round(amount.value * 1.16))
@@ -59,20 +59,20 @@
                       :class="{ active: tab === t.comp }"
                       @click="tab = t.comp">{{ t.name }}</button>
             </div>
-            <!-- динамический компонент -->
+            <!-- dynamic component -->
             <component :is="tab" />
 
             <div class="card">
-              <p>Сумма (компонент с v-model, автофокус через v-focus):</p>
+              <p>Amount (component with v-model, autofocus via v-focus):</p>
               <MoneyInput v-model="amount" />
-              <p class="muted">С НДС 16%: {{ withTax }} ₸</p>
+              <p class="muted">With 16% VAT: {{ withTax }} ₸</p>
             </div>
           </div>
         `,
       }
 
       const app = createApp(App)
-      // Глобальная кастомная директива.
+      // Global custom directive.
       app.directive('focus', {
         mounted(el) {
           el.focus()

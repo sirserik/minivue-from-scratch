@@ -1,52 +1,63 @@
 // ============================================================================
-//  compile.js — из AST в render-функцию
+//  compile.js — from AST to render function
 // ----------------------------------------------------------------------------
-//  Парсер (parse.js) дал нам дерево узлов. Теперь по нему надо сгенерировать код
-//  render-функции — той самой, что возвращает h(...). Мы делаем это в два приёма:
+//  The parser (parse.js) gave us a tree of nodes. Now we need to generate the
+//  code of the render function — the one that returns h(...). We do it in two
+//  passes:
 //
-//    1) transform — классифицируем «сырые» атрибуты в директивы (v-if, v-for,
-//       :bind, @on) и раскладываем по удобным полям узла;
-//    2) generate — обходим дерево и собираем СТРОКУ с кодом вида
-//       "h('div', {...}, [...])", а затем превращаем её в настоящую функцию
-//       через new Function.
+//    1) transform — classify the "raw" attributes into directives (v-if, v-for,
+//       :bind, @on) and spread them across convenient fields on the node;
+//    2) generate — walk the tree and build up a STRING of code like
+//       "h('div', {...}, [...])", then turn that string into a real function
+//       via new Function.
 //
-//  Итоговая функция принимает ctx и через with(ctx) обращается к состоянию
-//  компонента напрямую: {{ count }} становится h(...) с выражением count,
-//  которое with достанет из ctx.
+//  The resulting function receives ctx and, through with(ctx), accesses the
+//  component state directly: {{ count }} becomes h(...) with the expression
+//  count, which `with` pulls out of ctx.
 // ============================================================================
 
 import { parse, NodeTypes } from './parse.js'
 import { h, Fragment, withDirectives } from '../runtime-core/vnode.js'
 import { resolveComponent, resolveDirective } from '../runtime-core/component.js'
 
-// Публичная функция: строка-шаблон → готовая render-функция.
+/**
+ * Compile a template string into a ready-to-use render function.
+ * @param {string} template - The component's template markup.
+ * @returns {(ctx: object) => import('../runtime-core/vnode.js')} render function that returns a vnode.
+ */
 export function compile(template) {
   const ast = parse(template)
   const code = generate(ast)
   return createRenderFunction(code)
 }
 
-// Экспортируем и отдельные шаги — пригодятся в тестах и для показа кода в книге.
+/**
+ * Compile a template into the generated render-function source string, without
+ * turning it into an actual function. Handy for tests and for showing the
+ * generated code in the book.
+ * @param {string} template - The component's template markup.
+ * @returns {string} The generated render-function body (an h(...) expression).
+ */
 export function compileToString(template) {
   return generate(parse(template))
 }
 
-// --- превращение сгенерированной строки в функцию --------------------------
+// --- turning the generated string into a function --------------------------
 function createRenderFunction(code) {
-  // Вспомогательные функции, доступные внутри сгенерированного кода:
-  //   _s — привести значение к строке (для интерполяции),
-  //   _l — отрисовать список (v-for),
-  //   h, Fragment — из рантайма.
+  // Helper functions available inside the generated code:
+  //   _s — coerce a value to a string (for interpolation),
+  //   _l — render a list (v-for),
+  //   h, Fragment — from the runtime.
   const _s = (v) => (v == null ? '' : String(v))
   const _l = renderList
-  const _c = resolveComponent // разрешение компонентов по имени
-  const _key = checkKey // проверка клавиши для модификаторов @keyup.enter и т.п.
+  const _c = resolveComponent // resolve components by name
+  const _key = checkKey // check the key for @keyup.enter and similar modifiers
   const _cd = (is) => (typeof is === 'string' ? resolveComponent(is) : is) // <component :is>
-  const _wd = withDirectives // навесить кастомные директивы
-  const _dir = resolveDirective // найти директиву по имени
+  const _wd = withDirectives // attach custom directives
+  const _dir = resolveDirective // look up a directive by name
 
-  // Функция-фабрика создаёт render со всеми помощниками в области видимости.
-  // with(ctx) внутри позволяет писать в шаблоне count вместо ctx.count.
+  // The factory function creates `render` with all the helpers in scope.
+  // with(ctx) inside lets the template write `count` instead of `ctx.count`.
   // eslint-disable-next-line no-new-func
   const factory = new Function(
     'h',
@@ -63,7 +74,7 @@ function createRenderFunction(code) {
   return factory(h, Fragment, _s, _l, _c, _key, _cd, _wd, _dir)
 }
 
-// Соответствие модификатора клавиши значению event.key.
+// Mapping from a key modifier to the corresponding event.key value.
 const KEY_MAP = {
   enter: 'Enter',
   tab: 'Tab',
@@ -78,7 +89,7 @@ const KEY_MAP = {
 }
 const KEY_MODS = Object.keys(KEY_MAP)
 
-// _key($event, ['enter']) — true, если нажатая клавиша подходит под модификатор.
+// _key($event, ['enter']) — true if the pressed key matches the modifier.
 function checkKey(event, mods) {
   return mods.some((m) => {
     const expected = KEY_MAP[m]
@@ -86,7 +97,7 @@ function checkKey(event, mods) {
   })
 }
 
-// _l: отрисовать список для v-for. Поддерживает массивы, числа (1..n) и объекты.
+// _l: render a list for v-for. Supports arrays, numbers (1..n) and objects.
 function renderList(source, fn) {
   const result = []
   if (Array.isArray(source) || typeof source === 'string') {
@@ -101,15 +112,20 @@ function renderList(source, fn) {
 }
 
 // ===========================================================================
-//  ГЕНЕРАЦИЯ КОДА
+//  CODE GENERATION
 // ===========================================================================
+/**
+ * Generate the render-function body from an AST.
+ * @param {Array} ast - Array of top-level AST nodes returned by parse().
+ * @returns {string} A source-code expression: an h(...) call (or Fragment).
+ */
 function generate(ast) {
-  const children = ast // parseChildren вернул массив узлов верхнего уровня
+  const children = ast // parseChildren returned an array of top-level nodes
   if (children.length === 1) {
-    // Один корневой узел — возвращаем его напрямую.
+    // A single root node — return it directly.
     return genNode(children[0])
   }
-  // Несколько корней — заворачиваем во Fragment (тег-невидимка из слоя 2).
+  // Multiple roots — wrap them in a Fragment (the invisible tag from layer 2).
   return `h(Fragment, null, ${genChildren(children)})`
 }
 
@@ -118,10 +134,10 @@ function genNode(node) {
     case NodeTypes.ELEMENT:
       return genElement(node)
     case NodeTypes.TEXT:
-      // Текст — строковый литерал. JSON.stringify экранирует кавычки/переносы.
+      // Text — a string literal. JSON.stringify escapes quotes/newlines.
       return JSON.stringify(node.content)
     case NodeTypes.INTERPOLATION:
-      // {{ expr }} → _s(expr): значение выражения, приведённое к строке.
+      // {{ expr }} → _s(expr): the expression's value coerced to a string.
       return `_s(${node.content})`
     default:
       return 'null'
@@ -131,8 +147,8 @@ function genNode(node) {
 function genElement(node) {
   const directives = classify(node.props)
 
-  // v-for оборачивает узел в _l(список, (item, index) => <тот же узел>).
-  // Убираем сам v-for, чтобы не зациклиться, и генерируем внутренность.
+  // v-for wraps the node in _l(list, (item, index) => <the same node>).
+  // We strip the v-for itself so we don't loop forever, then generate the body.
   if (directives.for) {
     const { source, valueAlias, indexAlias } = parseForExpression(directives.for)
     const inner = genElementWithoutStructural(node, directives)
@@ -140,14 +156,15 @@ function genElement(node) {
     return `_l(${source}, (${args}) => ${inner})`
   }
 
-  // v-if генерируется на уровне списка детей (нужен доступ к соседним v-else),
-  // поэтому здесь обрабатываем узел без структурных директив.
+  // v-if is generated at the children-list level (it needs access to the
+  // sibling v-else branches), so here we handle the node without structural
+  // directives.
   return genElementWithoutStructural(node, directives)
 }
 
-// Сгенерировать h('tag', props, children) без учёта v-for/v-if.
+// Generate h('tag', props, children) ignoring v-for/v-if.
 function genElementWithoutStructural(node, directives) {
-  // v-model раскрывается в связку :value + @input (или modelValue у компонента).
+  // v-model expands into a :value + @input pair (or modelValue on a component).
   if (directives.model) applyVModel(node, directives)
 
   const tag = genTag(node, directives)
@@ -155,7 +172,7 @@ function genElementWithoutStructural(node, directives) {
   const children = genChildren(node.children)
   let code = `h(${tag}, ${props}, ${children})`
 
-  // Кастомные директивы (v-focus, v-color): оборачиваем в _wd(vnode, [[...]]).
+  // Custom directives (v-focus, v-color): wrap in _wd(vnode, [[...]]).
   if (directives.dirs.length) {
     const bindings = directives.dirs.map(genDirectiveBinding).join(', ')
     code = `_wd(${code}, [${bindings}])`
@@ -163,10 +180,10 @@ function genElementWithoutStructural(node, directives) {
   return code
 }
 
-// Выбор «типа» узла: динамический компонент, компонент по имени или HTML-тег.
+// Choose the node's "type": dynamic component, component by name, or HTML tag.
 function genTag(node, directives) {
   if (node.tag === 'component') {
-    // <component :is="x"> — тип вычисляется из :is. Убираем is из props.
+    // <component :is="x"> — the type is computed from :is. Remove is from props.
     const isBind = directives.binds.find((b) => b.arg === 'is')
     const isAttr = directives.attrs.find((a) => a.name === 'is')
     directives.binds = directives.binds.filter((b) => b.arg !== 'is')
@@ -174,11 +191,11 @@ function genTag(node, directives) {
     const expr = isBind ? isBind.exp : isAttr ? JSON.stringify(isAttr.value) : 'null'
     return `_cd(${expr})`
   }
-  // Тег с большой буквы или с дефисом (RouterView) — компонент по имени.
+  // A capitalized or hyphenated tag (RouterView) — a component by name.
   return isComponentTag(node.tag) ? `_c(${JSON.stringify(node.tag)})` : JSON.stringify(node.tag)
 }
 
-// Одна директива → [_dir('name'), значение, аргумент, { модификаторы }].
+// One directive → [_dir('name'), value, argument, { modifiers }].
 function genDirectiveBinding(dir) {
   const value = dir.exp ? `(${dir.exp})` : 'void 0'
   const arg = dir.arg ? JSON.stringify(dir.arg) : 'void 0'
@@ -188,23 +205,23 @@ function genDirectiveBinding(dir) {
   return `[_dir(${JSON.stringify(dir.name)}), ${value}, ${arg}, ${mods}]`
 }
 
-// v-model — «синтаксический сахар» над привязкой значения и обработчиком ввода.
+// v-model — "syntactic sugar" over a value binding plus an input handler.
 // <input v-model="name">  ≡  <input :value="name" @input="name = $event.target.value">
-// Выбираем свойство и событие по типу поля: текст → value/input,
-// чекбокс → checked/change, select → value/change.
+// We pick the property and event by field type: text → value/input,
+// checkbox → checked/change, select → value/change.
 function applyVModel(node, directives) {
   const exp = directives.model.exp
   const mods = directives.model.modifiers || []
 
-  // v-model на КОМПОНЕНТЕ: :modelValue + @update:modelValue (emit передаёт
-  // значение первым аргументом, оно и станет $event).
+  // v-model on a COMPONENT: :modelValue + @update:modelValue (emit passes the
+  // value as the first argument, which becomes $event).
   if (isComponentTag(node.tag)) {
     directives.binds.push({ arg: 'modelValue', exp })
     directives.ons.push({ event: 'update:modelValue', exp: `${exp} = $event`, modifiers: [] })
     return
   }
 
-  // Тип поля: из статического type="..." или из :type.
+  // Field type: from a static type="..." or from :type.
   const typeAttr = directives.attrs.find((a) => a.name === 'type')
   const type = typeAttr ? typeAttr.value : null
 
@@ -219,7 +236,7 @@ function applyVModel(node, directives) {
     event = 'change'
   }
 
-  // Значение из события, с учётом модификаторов .number / .trim.
+  // The value from the event, honoring the .number / .trim modifiers.
   let valueExpr = `$event.target.${field}`
   if (mods.includes('number')) valueExpr = `Number(${valueExpr})`
   else if (mods.includes('trim')) valueExpr = `${valueExpr}.trim()`
@@ -232,12 +249,13 @@ function isComponentTag(tag) {
   return /^[A-Z]/.test(tag) || tag.includes('-')
 }
 
-// --- атрибуты и обработчики → объект props ---------------------------------
+// --- attributes and handlers → props object --------------------------------
 function genProps(directives) {
   const entries = []
-  // class и style собираем отдельно: на одном элементе могут быть и статический
-  // class="x", и :class="{...}". Их надо СЛИТЬ (в массив), а не затереть один
-  // другим — нормализацией на рантайме займётся normalizeClass/normalizeStyle.
+  // class and style are collected separately: a single element can have both a
+  // static class="x" and a :class="{...}". They must be MERGED (into an array),
+  // not overwrite one another — the runtime's normalizeClass/normalizeStyle
+  // handles normalization.
   const classParts = []
   const styleParts = []
 
@@ -247,19 +265,19 @@ function genProps(directives) {
     else entries.push(`${JSON.stringify(attr.name)}: ${JSON.stringify(attr.value)}`)
   }
   for (const bind of directives.binds) {
-    // :id="expr" — значение вычисляется. exp кладём как есть, with(ctx) достанет.
+    // :id="expr" — the value is computed. We emit exp as-is; with(ctx) resolves it.
     if (bind.arg === 'class') classParts.push(`(${bind.exp})`)
     else if (bind.arg === 'style') styleParts.push(`(${bind.exp})`)
     else entries.push(`${JSON.stringify(bind.arg)}: (${bind.exp})`)
   }
-  // Одна часть — как есть; несколько — массивом (normalizeClass его развернёт).
+  // A single part — as-is; several — as an array (normalizeClass unfolds it).
   if (classParts.length === 1) entries.push(`"class": ${classParts[0]}`)
   else if (classParts.length > 1) entries.push(`"class": [${classParts.join(', ')}]`)
   if (styleParts.length === 1) entries.push(`"style": ${styleParts[0]}`)
   else if (styleParts.length > 1) entries.push(`"style": [${styleParts.join(', ')}]`)
 
   for (const on of directives.ons) {
-    // @click="handler" → onClick. Имя события с заглавной буквы.
+    // @click="handler" → onClick. Event name with a capitalized first letter.
     const key = 'on' + on.event[0].toUpperCase() + on.event.slice(1)
     entries.push(`${JSON.stringify(key)}: ${genHandler(on)}`)
   }
@@ -267,22 +285,22 @@ function genProps(directives) {
   return entries.length ? `{ ${entries.join(', ')} }` : 'null'
 }
 
-// Сгенерировать обработчик события с учётом модификаторов.
-//   @click="doThing"          — ссылка на метод, используем как есть;
-//   @click="count++"          — инлайн-выражение, оборачиваем в $event => (...);
-//   @click.stop.prevent="fn"  — оборачиваем и добавляем guard'ы;
-//   @keyup.enter="fn"         — вызываем только для нужной клавиши.
+// Generate an event handler, honoring modifiers.
+//   @click="doThing"          — a method reference, used as-is;
+//   @click="count++"          — an inline expression, wrapped in $event => (...);
+//   @click.stop.prevent="fn"  — wrapped, with guards added;
+//   @keyup.enter="fn"         — invoked only for the matching key.
 function genHandler(on) {
   const exp = on.exp
   const mods = on.modifiers || []
   const isMethodPath = /^[A-Za-z_$][\w$.]*$/.test(exp.trim())
 
-  // Без модификаторов — как раньше (короткий код, совместимо).
+  // No modifiers — same as before (short code, backwards compatible).
   if (mods.length === 0) {
     return isMethodPath ? `(${exp})` : `$event => (${exp})`
   }
 
-  // С модификаторами — оборачиваем в стрелочную функцию с проверками.
+  // With modifiers — wrap in an arrow function with the checks.
   const guards = []
   const keyMods = mods.filter((m) => KEY_MODS.includes(m))
   if (keyMods.length) guards.push(`if(!_key($event,${JSON.stringify(keyMods)}))return;`)
@@ -294,7 +312,7 @@ function genHandler(on) {
   return `$event => { ${guards.join('')} ${call} }`
 }
 
-// --- дети с учётом v-if / v-else -------------------------------------------
+// --- children, honoring v-if / v-else --------------------------------------
 function genChildren(children) {
   if (!children || children.length === 0) return 'null'
 
@@ -304,9 +322,9 @@ function genChildren(children) {
     const dirs = child.type === NodeTypes.ELEMENT ? classify(child.props) : null
 
     if (dirs && dirs.if != null) {
-      // Собираем цепочку v-if / v-else-if / v-else в тернарный оператор.
-      // genNode игнорирует сами директивы (classify отделяет их от атрибутов),
-      // поэтому дополнительно «раздевать» узел не нужно.
+      // Fold the v-if / v-else-if / v-else chain into a ternary expression.
+      // genNode ignores the directives themselves (classify separates them from
+      // attributes), so no extra "stripping" of the node is needed.
       let code = `(${dirs.if}) ? ${genNode(child)}`
       let j = i + 1
       let hasElse = false
@@ -322,29 +340,29 @@ function genChildren(children) {
           break
         } else break
       }
-      if (!hasElse) code += ' : null' // нет v-else — рисуем «ничего»
+      if (!hasElse) code += ' : null' // no v-else — render "nothing"
       pieces.push(code)
-      i = j - 1 // перескакиваем обработанные ветки
+      i = j - 1 // skip over the branches we already handled
     } else {
       pieces.push(genNode(child))
     }
   }
 
-  // v-for возвращает массив — его надо «влить» в общий список через spread.
+  // v-for returns an array — it must be "poured" into the overall list via spread.
   const joined = pieces
     .map((p) => (p.startsWith('_l(') ? `...${p}` : p))
     .join(', ')
   return `[${joined}]`
 }
 
-// --- классификация «сырых» атрибутов в директивы ---------------------------
+// --- classify "raw" attributes into directives -----------------------------
 function classify(props = []) {
   const result = {
-    attrs: [], // статические: class="x"
+    attrs: [], // static: class="x"
     binds: [], // :id / v-bind:id
-    ons: [], // @click / v-on:click (с модификаторами)
+    ons: [], // @click / v-on:click (with modifiers)
     model: null, // v-model
-    dirs: [], // кастомные директивы v-focus, v-color:arg.mod
+    dirs: [], // custom directives v-focus, v-color:arg.mod
     if: null,
     elseif: null,
     else: false,
@@ -370,7 +388,7 @@ function classify(props = []) {
 
 // 'v-color:bg.important' → { name: 'color', arg: 'bg', modifiers: ['important'], exp }
 function parseDirective(name, value) {
-  const [head, ...modifiers] = name.slice(2).split('.') // убираем 'v-'
+  const [head, ...modifiers] = name.slice(2).split('.') // strip the 'v-'
   const [dirName, arg] = head.split(':')
   return { name: dirName, arg, modifiers, exp: value }
 }
@@ -381,7 +399,7 @@ function parseEvent(raw, value) {
   return { event, exp: value, modifiers }
 }
 
-// Разобрать выражение v-for: "item in list" или "(item, index) in list".
+// Parse a v-for expression: "item in list" or "(item, index) in list".
 function parseForExpression(exp) {
   const inMatch = /^(.*?)\s+(?:in|of)\s+(.*)$/.exec(exp.trim())
   const source = inMatch[2].trim()

@@ -1,29 +1,33 @@
 // ============================================================================
-//  shared.js — мелкие утилиты, общие для рантайма, компилятора и SSR
+//  shared.js — small utilities shared by the runtime, compiler, and SSR
 // ----------------------------------------------------------------------------
-//  В шаблонах class и style удобно задавать не только строкой, но и объектом
-//  или массивом:
+//  In templates, class and style are convenient to specify not only as a
+//  string, but also as an object or an array:
 //
-//    :class="{ active: isActive, done: isDone }"   // включаем классы по условию
-//    :class="['btn', isPrimary && 'btn-primary']"  // список
+//    :class="{ active: isActive, done: isDone }"   // toggle classes by condition
+//    :class="['btn', isPrimary && 'btn-primary']"  // list
 //    :style="{ color: 'red', fontSize: size + 'px' }"
 //
-//  Чтобы и браузер, и SSR понимали любую из этих форм одинаково, приводим их к
-//  каноничному виду здесь.
+//  So that both the browser and SSR understand any of these forms the same way,
+//  we normalize them to a canonical form here.
 // ============================================================================
 
-// Привести class к строке: 'a b c'.
+/**
+ * Normalize a class value (string, array, or object) to a string like 'a b c'.
+ * @param {string|Array|object} value - Class binding value.
+ * @returns {string} Space-separated class string.
+ */
 export function normalizeClass(value) {
   if (typeof value === 'string') return value.trim()
   if (Array.isArray(value)) {
-    // Массив: нормализуем каждый элемент и склеиваем непустые.
+    // Array: normalize each item and join the non-empty ones.
     return value
       .map(normalizeClass)
       .filter(Boolean)
       .join(' ')
   }
   if (value && typeof value === 'object') {
-    // Объект { имяКласса: включён? } — берём ключи с истинным значением.
+    // Object { className: enabled? } — keep keys with a truthy value.
     return Object.keys(value)
       .filter((key) => value[key])
       .join(' ')
@@ -31,10 +35,15 @@ export function normalizeClass(value) {
   return ''
 }
 
-// Привести style к объекту { свойство: значение }. Строку разбираем в объект.
+/**
+ * Normalize a style value to an object { property: value }.
+ * Arrays are merged; strings are parsed into an object.
+ * @param {string|Array|object} value - Style binding value.
+ * @returns {object} Style object.
+ */
 export function normalizeStyle(value) {
   if (Array.isArray(value)) {
-    // Массив объектов стилей — сливаем в один.
+    // Array of style objects — merge into one.
     const result = {}
     for (const item of value) Object.assign(result, normalizeStyle(item))
     return result
@@ -51,8 +60,12 @@ export function normalizeStyle(value) {
   return {}
 }
 
-// Объект стиля → строка 'color:red;font-size:14px' (для атрибута и SSR).
-// camelCase-свойства переводим в kebab-case: fontSize → font-size.
+/**
+ * Serialize a style value to a string like 'color:red;font-size:14px'
+ * (for the attribute and SSR); camelCase properties become kebab-case.
+ * @param {string|Array|object} style - Style binding value.
+ * @returns {string} Serialized style string.
+ */
 export function styleToString(style) {
   const obj = normalizeStyle(style)
   return Object.keys(obj)
@@ -60,6 +73,11 @@ export function styleToString(style) {
     .join(';')
 }
 
+/**
+ * Convert a camelCase string to kebab-case: fontSize → font-size.
+ * @param {string} str - camelCase string.
+ * @returns {string} kebab-case string.
+ */
 export function camelToKebab(str) {
   return str.replace(/[A-Z]/g, (m) => '-' + m.toLowerCase())
 }

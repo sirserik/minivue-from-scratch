@@ -1,24 +1,29 @@
 // ============================================================================
-//  scheduler.js — очередь обновлений и nextTick
+//  scheduler.js — the update queue and nextTick
 // ----------------------------------------------------------------------------
-//  Если менять несколько реактивных значений подряд, наивная реактивность
-//  перерисует компонент столько же раз. Это расточительно: пользователю важен
-//  только итог. Поэтому обновления компонентов мы не выполняем сразу, а кладём
-//  в очередь и разбираем её один раз — асинхронно, «в конце текущего тика».
+//  If you change several reactive values one after another, naive reactivity
+//  would re-render the component just as many times. That's wasteful: the user
+//  only cares about the final result. So we don't run component updates right
+//  away — we push them into a queue and drain it once, asynchronously, "at the
+//  end of the current tick".
 //
-//  Так три изменения подряд дают одну перерисовку. Тот же приём во Vue, React
-//  (батчинг) и почти любом современном UI-фреймворке.
+//  This way three changes in a row produce a single re-render. The same trick is
+//  used in Vue, React (batching) and almost any modern UI framework.
 // ============================================================================
 
-const queue = [] // задания на обновление (по одному на компонент)
-let isFlushing = false // идёт ли уже разбор очереди
-// Одно и то же завершённое обещание — дешёвый способ «выполнить после текущего
-// синхронного кода». Микрозадача промиса выполнится, как только стек опустеет.
+const queue = [] // update jobs (one per component)
+let isFlushing = false // whether the queue is already being drained
+// One and the same already-resolved promise — a cheap way to "run after the
+// current synchronous code". The promise microtask runs as soon as the stack
+// empties out.
 const resolvedPromise = Promise.resolve()
 let currentFlushPromise = null
 
-// Поставить задание в очередь. Если оно там уже есть — не дублируем (компонент
-// не нужно обновлять дважды за один тик).
+/**
+ * Queue an update job. If it's already in the queue we don't duplicate it (a
+ * component doesn't need to be updated twice within one tick).
+ * @param {Function & { id?: number }} job The update job to schedule.
+ */
 export function queueJob(job) {
   if (!queue.includes(job)) {
     queue.push(job)
@@ -34,9 +39,9 @@ function queueFlush() {
 
 function flushJobs() {
   try {
-    // Сортируем по возрастанию id компонента. У родителя id меньше, чем у
-    // ребёнка (он создан раньше), поэтому родитель обновится первым. Это важно:
-    // родитель может удалить ребёнка, и тогда обновлять ребёнка уже не нужно.
+    // Sort by ascending component id. A parent has a smaller id than its child
+    // (it was created earlier), so the parent updates first. This matters: the
+    // parent may remove the child, and then updating the child is no longer needed.
     queue.sort((a, b) => a.id - b.id)
     for (let i = 0; i < queue.length; i++) {
       queue[i]()
@@ -48,10 +53,14 @@ function flushJobs() {
   }
 }
 
-// nextTick(fn) — «выполнить после того, как применятся все запланированные
-// обновления DOM». Без аргумента возвращает обещание, которого можно await'ить.
-//   await nextTick()
-//   // здесь DOM уже обновлён
+/**
+ * nextTick(fn) — "run after all scheduled DOM updates have been applied". Without
+ * an argument it returns a promise you can await.
+ *   await nextTick()
+ *   // the DOM is already updated here
+ * @param {Function} [fn] Optional callback to run after the flush.
+ * @returns {Promise} A promise that resolves once pending updates are flushed.
+ */
 export function nextTick(fn) {
   const p = currentFlushPromise || resolvedPromise
   return fn ? p.then(fn) : p

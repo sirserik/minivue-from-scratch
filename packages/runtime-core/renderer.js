@@ -1,21 +1,29 @@
 // ============================================================================
-//  renderer.js — превращает дерево VNode в реальные узлы и обновляет их
+//  renderer.js — turns a tree of VNodes into real nodes and updates them
 // ----------------------------------------------------------------------------
-//  Рендерер не знает, где он работает — в браузере, на сервере или в тесте.
-//  Все операции над «настоящими» узлами он получает снаружи, в объекте options
-//  (это и есть nodeOps). Так один и тот же алгоритм diff работает и с DOM, и с
-//  выдуманным деревом в тесте. Именно так устроен настоящий Vue.
+//  The renderer doesn't know where it runs — in the browser, on the server, or
+//  in a test. It receives all operations over "real" nodes from the outside, in
+//  the options object (this is nodeOps). That way the same diff algorithm works
+//  both with the DOM and with a made-up tree in a test. This is exactly how the
+//  real Vue is built.
 //
-//  Главные действующие лица:
-//    render(vnode, container) — точка входа: показать vnode внутри container
-//    patch(n1, n2, ...)       — сравнить старый узел n1 и новый n2, внести правки
-//    mount* / patch* / unmount — конкретные операции монтирования/обновления
+//  The main players:
+//    render(vnode, container) — entry point: show vnode inside container
+//    patch(n1, n2, ...)       — compare old node n1 with new n2, apply changes
+//    mount* / patch* / unmount — concrete mount/update operations
 // ============================================================================
 
 import { Text, Fragment, normalizeVNode } from './vnode.js'
 
+/**
+ * Create a renderer bound to a set of platform node operations (nodeOps).
+ * The renderer is platform-agnostic: give it browser DOM ops and it renders to
+ * the DOM; give it test ops and it renders to a mock tree.
+ * @param {object} options Host node operations (createElement, insert, patchProp, ...).
+ * @returns {{ render: Function, hydrate: Function, createRenderer: Function, patch: Function, __installComponents: Function }}
+ */
 export function createRenderer(options) {
-  // Распаковываем платформенные операции. Для браузера их даст runtime-dom.
+  // Unpack the platform operations. For the browser they come from runtime-dom.
   const {
     createElement: hostCreateElement,
     createText: hostCreateText,
@@ -27,19 +35,19 @@ export function createRenderer(options) {
   } = options
 
   // -------------------------------------------------------------------------
-  //  patch — сердце рендерера. Сравнивает n1 («было») и n2 («стало»).
-  //   n1 === null           → это первое появление узла, монтируем.
-  //   n1.type !== n2.type   → узлы несовместимы, старый убираем, новый монтируем.
-  //   иначе                 → обновляем на месте (самый частый и дешёвый путь).
-  //  anchor — «якорь»: перед каким узлом вставлять (нужно, чтобы попадать в
-  //  нужное место среди соседей). null означает «в конец».
+  //  patch — the heart of the renderer. Compares n1 ("was") and n2 ("is now").
+  //   n1 === null           → this is the node's first appearance, mount it.
+  //   n1.type !== n2.type   → nodes are incompatible: remove the old, mount new.
+  //   otherwise             → update in place (the most common and cheapest path).
+  //  anchor — the "anchor": which node to insert before (needed to land in the
+  //  right spot among siblings). null means "at the end".
   // -------------------------------------------------------------------------
   function patch(n1, n2, container, anchor = null) {
-    // Тот же самый объект — сравнивать нечего.
+    // The very same object — nothing to compare.
     if (n1 === n2) return
 
-    // Разные типы узлов нельзя обновлять друг в друга (div не станет span).
-    // Убираем старый и дальше пойдём по ветке монтирования.
+    // Nodes of different types can't be updated into one another (a div won't
+    // become a span). Remove the old one and continue down the mount branch.
     if (n1 && n1.type !== n2.type) {
       unmount(n1)
       n1 = null
@@ -53,15 +61,15 @@ export function createRenderer(options) {
     } else if (typeof type === 'string') {
       processElement(n1, n2, container, anchor)
     } else if (type && type.__isTeleport) {
-      // Teleport (слой 11): дети уезжают в другой контейнер.
+      // Teleport (layer 11): children move to a different container.
       processTeleport(n1, n2, container, anchor)
     } else if (typeof type === 'object' || typeof type === 'function') {
       if (n1 == null && n2.__keptAlive) {
-        // KeepAlive-активация: не монтируем заново, а возвращаем спрятанный DOM.
+        // KeepAlive activation: don't mount again, return the hidden DOM instead.
         hostInsert(n2.component.subTree.el, container, anchor)
         n2.el = n2.component.subTree.el
       } else {
-        // Обычный компонент (реализация из слоя 3).
+        // A regular component (implementation from layer 3).
         processComponent(n1, n2, container, anchor)
       }
     }
@@ -71,8 +79,8 @@ export function createRenderer(options) {
   function processTeleport(n1, n2, container, anchor) {
     const target = resolveTeleportTarget(n2.props)
     if (n1 == null) {
-      // Ставим пустой якорь на исходном месте (чтобы соседи не сбились),
-      // а детей монтируем в целевой контейнер.
+      // Put an empty anchor at the original spot (so siblings don't shift),
+      // and mount the children into the target container.
       n2.el = hostCreateText('')
       hostInsert(n2.el, container, anchor)
       n2.target = target
@@ -89,24 +97,24 @@ export function createRenderer(options) {
     if (typeof to === 'string') {
       return options.querySelector ? options.querySelector(to) : null
     }
-    return to || null // передали сам элемент
+    return to || null // the element itself was passed
   }
 
-  // Ленивое «хранилище» — off-DOM контейнер, куда прячутся деактивированные
-  // KeepAlive-компоненты (их DOM живёт там, пока их снова не покажут).
+  // A lazy "storage" — an off-DOM container where deactivated KeepAlive
+  // components hide (their DOM lives there until they're shown again).
   let _storage = null
   function keepAliveStorage() {
     return _storage || (_storage = hostCreateElement('div'))
   }
 
-  // --- Текстовые узлы -------------------------------------------------------
+  // --- Text nodes -----------------------------------------------------------
   function processText(n1, n2, container, anchor) {
     if (n1 == null) {
-      // Монтируем новый текстовый узел. children у Text — это сама строка.
+      // Mount a new text node. For Text, children is the string itself.
       n2.el = hostCreateText(n2.children)
       hostInsert(n2.el, container, anchor)
     } else {
-      // Обновляем: переиспользуем существующий узел, меняем только текст.
+      // Update: reuse the existing node, change only the text.
       n2.el = n1.el
       if (n2.children !== n1.children) {
         hostSetText(n2.el, n2.children)
@@ -114,17 +122,17 @@ export function createRenderer(options) {
     }
   }
 
-  // --- Фрагменты (группа узлов без родительского тега) ----------------------
+  // --- Fragments (a group of nodes without a parent tag) --------------------
   function processFragment(n1, n2, container, anchor) {
     if (n1 == null) {
       mountChildren(n2.children, container, anchor)
     } else {
-      // Оба — фрагменты: сравниваем их детей напрямую в том же контейнере.
+      // Both are fragments: diff their children directly in the same container.
       patchChildren(n1, n2, container, anchor)
     }
   }
 
-  // --- Элементы (div, span, ul, ...) ---------------------------------------
+  // --- Elements (div, span, ul, ...) ---------------------------------------
   function processElement(n1, n2, container, anchor) {
     if (n1 == null) {
       mountElement(n2, container, anchor)
@@ -135,33 +143,33 @@ export function createRenderer(options) {
 
   function mountElement(vnode, container, anchor) {
     const { type, props, children } = vnode
-    // 1. Создаём сам элемент и запоминаем ссылку на него в vnode.el.
+    // 1. Create the element itself and remember a reference to it in vnode.el.
     const el = (vnode.el = hostCreateElement(type))
 
-    // 2. Ставим атрибуты и обработчики. oldValue = null (их ещё нет).
+    // 2. Set attributes and handlers. oldValue = null (there aren't any yet).
     for (const key in props) {
-      if (key === 'key') continue // key — служебный, в DOM не пишем
+      if (key === 'key') continue // key is internal, not written to the DOM
       hostPatchProp(el, key, null, props[key])
     }
 
-    // 3. Вставляем элемент в родителя СНАЧАЛА — чтобы к моменту монтирования
-    //    детей и вызова mounted-хуков директив узел уже был подключён к документу.
-    //    Иначе el.focus() и подобное в директивах выполнялись бы на «оторванном»
-    //    от страницы узле и не срабатывали.
+    // 3. Insert the element into the parent FIRST — so that by the time children
+    //    are mounted and directives' mounted hooks run, the node is already
+    //    attached to the document. Otherwise el.focus() and the like in
+    //    directives would run on a node detached from the page and wouldn't work.
     hostInsert(el, container, anchor)
 
-    // 4. Монтируем содержимое: строку — как текст, массив — по одному ребёнку.
+    // 4. Mount the content: a string as text, an array child by child.
     if (typeof children === 'string' || typeof children === 'number') {
       hostSetElementText(el, String(children))
     } else if (Array.isArray(children)) {
       mountChildren(children, el, null)
     }
 
-    // 5. Кастомные директивы: элемент уже в DOM — зовём их mounted-хук.
+    // 5. Custom directives: the element is already in the DOM — call their mounted hook.
     invokeDirectives(vnode, 'mounted')
   }
 
-  // Вызвать одноимённый хук у всех директив, навешанных на vnode.
+  // Call the like-named hook of every directive attached to the vnode.
   function invokeDirectives(vnode, name) {
     const dirs = vnode.dirs
     if (!dirs) return
@@ -173,19 +181,19 @@ export function createRenderer(options) {
 
   function mountChildren(children, container, anchor) {
     for (let i = 0; i < children.length; i++) {
-      // Нормализуем: строки/числа станут текстовыми VNode.
+      // Normalize: strings/numbers become text VNodes.
       const child = (children[i] = normalizeVNode(children[i]))
       patch(null, child, container, anchor)
     }
   }
 
   function patchElement(n1, n2) {
-    // Элемент того же типа — переиспользуем настоящий узел.
+    // Same-type element — reuse the real node.
     const el = (n2.el = n1.el)
     patchProps(el, n1.props, n2.props)
     patchChildren(n1, n2, el, null)
 
-    // Директивы: переносим прошлые значения в oldValue и зовём updated-хук.
+    // Directives: carry the previous values into oldValue and call the updated hook.
     if (n2.dirs) {
       n2.dirs.forEach((binding, i) => {
         binding.oldValue = n1.dirs ? n1.dirs[i].value : undefined
@@ -194,9 +202,9 @@ export function createRenderer(options) {
     }
   }
 
-  // Сравнить наборы атрибутов: обновить/добавить новые, убрать исчезнувшие.
+  // Compare two sets of attributes: update/add new ones, remove disappeared ones.
   function patchProps(el, oldProps, newProps) {
-    // Обновляем и добавляем.
+    // Update and add.
     for (const key in newProps) {
       if (key === 'key') continue
       const prev = oldProps[key]
@@ -205,7 +213,7 @@ export function createRenderer(options) {
         hostPatchProp(el, key, prev, next)
       }
     }
-    // Удаляем то, чего в новых props больше нет.
+    // Remove what's no longer present in the new props.
     for (const key in oldProps) {
       if (key === 'key') continue
       if (!(key in newProps)) {
@@ -215,64 +223,64 @@ export function createRenderer(options) {
   }
 
   // -------------------------------------------------------------------------
-  //  patchChildren — сравнить содержимое узла. Дети бывают трёх видов:
-  //  текст, массив узлов или пусто. Значит вариантов «было → стало» девять,
-  //  но они сводятся к нескольким осмысленным случаям.
+  //  patchChildren — compare the content of a node. Children come in three
+  //  kinds: text, an array of nodes, or empty. That gives nine "was → became"
+  //  combinations, but they boil down to a few meaningful cases.
   // -------------------------------------------------------------------------
   function patchChildren(n1, n2, container, anchor) {
     const c1 = n1.children
     const c2 = n2.children
 
     if (typeof c2 === 'string' || typeof c2 === 'number') {
-      // Стало текстом. Если было массивом — сначала снимаем старых детей.
+      // Became text. If it was an array, first remove the old children.
       if (Array.isArray(c1)) unmountChildren(c1)
       if (c1 !== c2) hostSetElementText(container, String(c2))
     } else if (Array.isArray(c2)) {
       if (Array.isArray(c1)) {
-        // Массив → массив: самый интересный случай, полноценный diff по ключам.
+        // Array → array: the most interesting case, a full keyed diff.
         patchKeyedChildren(c1, c2, container, anchor)
       } else {
-        // Было текстом/пусто → стало массивом: чистим текст и монтируем детей.
+        // Was text/empty → became an array: clear the text and mount children.
         hostSetElementText(container, '')
         mountChildren(c2, container, anchor)
       }
     } else {
-      // Стало пусто.
+      // Became empty.
       if (Array.isArray(c1)) unmountChildren(c1)
       else if (typeof c1 === 'string') hostSetElementText(container, '')
     }
   }
 
   // -------------------------------------------------------------------------
-  //  patchKeyedChildren — сравнение двух списков детей.
-  //  Наивно можно было бы снести старых и создать новых, но это медленно и
-  //  теряет состояние (фокус в поле ввода, позицию видео). Поэтому сопоставляем
-  //  узлы по ключам и переиспользуем максимум существующих, двигая их при нужде.
+  //  patchKeyedChildren — comparing two lists of children.
+  //  Naively we could tear down the old ones and create new ones, but that's
+  //  slow and loses state (input focus, video position). So we match nodes by
+  //  key and reuse as many existing ones as possible, moving them when needed.
   //
-  //  Алгоритм (тот же, что во Vue 3):
-  //   1) синхронизируем совпадающие узлы с НАЧАЛА, пока ключи совпадают;
-  //   2) синхронизируем совпадающие узлы с КОНЦА;
-  //   3) если остались только новые — монтируем их;
-  //   4) если остались только старые — размонтируем;
-  //   5) сложный случай (перемешаны) — строим карту ключей, обновляем совпавшие,
-  //      удаляем лишние и минимально двигаем через наибольшую возрастающую
-  //      подпоследовательность (LIS).
+  //  The algorithm (the same as in Vue 3):
+  //   1) sync matching nodes from the START while keys match;
+  //   2) sync matching nodes from the END;
+  //   3) if only new ones remain — mount them;
+  //   4) if only old ones remain — unmount them;
+  //   5) the hard case (shuffled) — build a key map, patch the matched ones,
+  //      remove the extra ones, and move minimally via the longest increasing
+  //      subsequence (LIS).
   // -------------------------------------------------------------------------
   function patchKeyedChildren(c1, c2, container, parentAnchor) {
-    // Нормализуем новых детей заранее (строки → текстовые VNode).
+    // Normalize the new children up front (strings → text VNodes).
     for (let i = 0; i < c2.length; i++) c2[i] = normalizeVNode(c2[i])
 
     let i = 0
-    let e1 = c1.length - 1 // последний индекс в старом списке
-    let e2 = c2.length - 1 // последний индекс в новом списке
+    let e1 = c1.length - 1 // last index in the old list
+    let e2 = c2.length - 1 // last index in the new list
 
-    // (1) Синхронизация с начала: пока ключи совпадают — обновляем на месте.
+    // (1) Sync from the start: while keys match — update in place.
     while (i <= e1 && i <= e2 && isSameVNode(c1[i], c2[i])) {
       patch(c1[i], c2[i], container, parentAnchor)
       i++
     }
 
-    // (2) Синхронизация с конца.
+    // (2) Sync from the end.
     while (i <= e1 && i <= e2 && isSameVNode(c1[e1], c2[e2])) {
       patch(c1[e1], c2[e2], container, parentAnchor)
       e1--
@@ -280,9 +288,9 @@ export function createRenderer(options) {
     }
 
     if (i > e1) {
-      // (3) Старые кончились, а новые остались (i..e2) — их надо смонтировать.
+      // (3) The old ones ran out but new ones remain (i..e2) — mount them.
       if (i <= e2) {
-        // Якорь — узел, стоящий сразу за вставляемым диапазоном.
+        // The anchor is the node standing right after the inserted range.
         const nextPos = e2 + 1
         const anchor = nextPos < c2.length ? c2[nextPos].el : parentAnchor
         while (i <= e2) {
@@ -291,34 +299,34 @@ export function createRenderer(options) {
         }
       }
     } else if (i > e2) {
-      // (4) Новые кончились, а старые остались (i..e1) — их надо удалить.
+      // (4) The new ones ran out but old ones remain (i..e1) — remove them.
       while (i <= e1) {
         unmount(c1[i])
         i++
       }
     } else {
-      // (5) Общий случай: пересекающийся неупорядоченный диапазон.
-      const s1 = i // старт в старом списке
-      const s2 = i // старт в новом списке
+      // (5) The general case: an overlapping, unordered range.
+      const s1 = i // start in the old list
+      const s2 = i // start in the new list
 
-      // Карта «ключ нового узла → его индекс», чтобы быстро искать совпадения.
+      // Map "new node key → its index", to quickly find matches.
       const keyToNewIndex = new Map()
       for (let k = s2; k <= e2; k++) {
         const child = c2[k]
         if (child.key != null) keyToNewIndex.set(child.key, k)
       }
 
-      const toBePatched = e2 - s2 + 1 // сколько новых узлов ещё предстоит обработать
+      const toBePatched = e2 - s2 + 1 // how many new nodes are still left to process
       let patched = 0
-      // newIndexToOldIndex[новыйОтносительныйИндекс] = старыйИндекс + 1.
-      // 0 означает «этому новому узлу не нашлось старого» → надо монтировать.
+      // newIndexToOldIndex[newRelativeIndex] = oldIndex + 1.
+      // 0 means "no old node was found for this new one" → it must be mounted.
       const newIndexToOldIndex = new Array(toBePatched).fill(0)
 
-      // Проходим по оставшимся СТАРЫМ узлам: обновляем совпавшие, удаляем лишние.
+      // Walk the remaining OLD nodes: patch the matched ones, remove the extra.
       for (let k = s1; k <= e1; k++) {
         const prevChild = c1[k]
         if (patched >= toBePatched) {
-          // Все новые уже нашли пару — остаток старых лишний.
+          // All new ones already found a pair — the rest of the old ones are extra.
           unmount(prevChild)
           continue
         }
@@ -326,7 +334,7 @@ export function createRenderer(options) {
         if (prevChild.key != null) {
           newIndex = keyToNewIndex.get(prevChild.key)
         } else {
-          // Узлы без ключа ищем перебором среди новых без пары.
+          // Keyless nodes are found by scanning the unpaired new ones.
           for (let j = s2; j <= e2; j++) {
             if (newIndexToOldIndex[j - s2] === 0 && isSameVNode(prevChild, c2[j])) {
               newIndex = j
@@ -335,7 +343,7 @@ export function createRenderer(options) {
           }
         }
         if (newIndex === undefined) {
-          // Старому узлу нет пары среди новых — удаляем.
+          // The old node has no pair among the new ones — remove it.
           unmount(prevChild)
         } else {
           newIndexToOldIndex[newIndex - s2] = k + 1
@@ -344,9 +352,9 @@ export function createRenderer(options) {
         }
       }
 
-      // Теперь двигаем и монтируем. Идём с КОНЦА, чтобы якорь (уже готовый
-      // правый сосед) всегда существовал.
-      const increasing = getSequence(newIndexToOldIndex) // индексы, что двигать не надо
+      // Now move and mount. We go from the END so the anchor (the already-ready
+      // right neighbor) always exists.
+      const increasing = getSequence(newIndexToOldIndex) // indices that need not move
       let seqPointer = increasing.length - 1
 
       for (let k = toBePatched - 1; k >= 0; k--) {
@@ -355,13 +363,13 @@ export function createRenderer(options) {
         const anchor = newIndex + 1 < c2.length ? c2[newIndex + 1].el : parentAnchor
 
         if (newIndexToOldIndex[k] === 0) {
-          // Пары не было — это новый узел, монтируем.
+          // There was no pair — this is a new node, mount it.
           patch(null, newChild, container, anchor)
         } else if (seqPointer < 0 || k !== increasing[seqPointer]) {
-          // Узел есть, но он не в «стабильной» подпоследовательности — двигаем.
+          // The node exists but isn't in the "stable" subsequence — move it.
           hostInsert(newChild.el, container, anchor)
         } else {
-          // Узел на своём относительном месте — двигать не нужно.
+          // The node is at its correct relative position — no move needed.
           seqPointer--
         }
       }
@@ -374,41 +382,41 @@ export function createRenderer(options) {
 
   function unmount(vnode) {
     if (vnode.type === Fragment) {
-      // У фрагмента нет своего узла — размонтируем его детей.
+      // A fragment has no node of its own — unmount its children.
       unmountChildren(vnode.children)
       return
     }
     if (vnode.type && vnode.type.__isTeleport) {
-      // Teleport: убираем детей из целевого контейнера и якорь-заглушку.
+      // Teleport: remove the children from the target container and the anchor stub.
       unmountChildren(vnode.children)
       hostRemove(vnode.el)
       return
     }
     if (vnode.__shouldKeepAlive && vnode.component) {
-      // KeepAlive-деактивация: НЕ разрушаем инстанс, а прячем его DOM в
-      // хранилище. Состояние компонента сохраняется до следующего показа.
+      // KeepAlive deactivation: do NOT destroy the instance, hide its DOM in the
+      // storage instead. The component's state is preserved until it's shown again.
       hostInsert(vnode.component.subTree.el, keepAliveStorage())
       return
     }
-    // Даём компонентам шанс размонтироваться правильно (слой 3 доопределит).
+    // Give components a chance to unmount properly (layer 3 fills this in).
     if (vnode.component) {
       unmountComponent(vnode)
       return
     }
-    // Директивы: хук перед удалением элемента из DOM.
+    // Directives: the hook before the element is removed from the DOM.
     invokeDirectives(vnode, 'beforeUnmount')
     hostRemove(vnode.el)
     invokeDirectives(vnode, 'unmounted')
   }
 
   // -------------------------------------------------------------------------
-  //  render — публичная точка входа. Хранит предыдущий VNode прямо на
-  //  контейнере (container._vnode), чтобы при следующем вызове было с чем
-  //  сравнивать.
+  //  render — the public entry point. It stores the previous VNode right on the
+  //  container (container._vnode), so that the next call has something to
+  //  compare against.
   // -------------------------------------------------------------------------
   function render(vnode, container) {
     if (vnode == null) {
-      // render(null, ...) означает «очистить» — размонтируем прошлое дерево.
+      // render(null, ...) means "clear" — unmount the previous tree.
       if (container._vnode) unmount(container._vnode)
     } else {
       patch(container._vnode || null, vnode, container, null)
@@ -417,19 +425,19 @@ export function createRenderer(options) {
   }
 
   // -------------------------------------------------------------------------
-  //  ГИДРАТАЦИЯ (слой 7). Сервер уже прислал готовый HTML. На клиенте не нужно
-  //  создавать элементы заново — надо «усыновить» существующие: связать наши
-  //  VNode с реальными узлами (vnode.el = узел) и навесить обработчики событий
-  //  (их в HTML нет). После этого приложение живёт как обычно — правки идут через
-  //  patch по уже адаптированному дереву.
+  //  HYDRATION (layer 7). The server already sent ready-made HTML. On the client
+  //  there's no need to create elements again — we need to "adopt" the existing
+  //  ones: link our VNodes to the real nodes (vnode.el = node) and attach event
+  //  handlers (which aren't in the HTML). After that the app lives as usual —
+  //  changes go through patch over the already-adopted tree.
   // -------------------------------------------------------------------------
   function hydrate(vnode, container) {
     hydrateNode(container.firstChild, vnode)
     container._vnode = vnode
   }
 
-  // Гидрировать один узел: сопоставить DOM-узел node и vnode. Возвращает
-  // следующий DOM-узел (правого соседа) — чтобы идти по детям по очереди.
+  // Hydrate a single node: match the DOM node `node` with `vnode`. Returns the
+  // next DOM node (the right sibling) — so we can walk the children in order.
   function hydrateNode(node, vnode) {
     vnode = normalizeVNode(vnode)
     const { type } = vnode
@@ -446,13 +454,13 @@ export function createRenderer(options) {
     }
 
     if (typeof type === 'string') {
-      // Элемент: связываем узел и навешиваем props. Статические атрибуты в HTML
-      // уже есть (setAttribute идемпотентен), а вот события добавляются здесь.
+      // Element: link the node and attach props. Static attributes are already in
+      // the HTML (setAttribute is idempotent), but events are added here.
       vnode.el = node
       for (const key in vnode.props) {
         if (key !== 'key') hostPatchProp(node, key, null, vnode.props[key])
       }
-      // Гидрируем детей по childNodes.
+      // Hydrate the children via childNodes.
       if (Array.isArray(vnode.children)) {
         let cur = node.firstChild
         for (const child of vnode.children) cur = hydrateNode(cur, child)
@@ -461,8 +469,8 @@ export function createRenderer(options) {
     }
 
     if (typeof type === 'object' || typeof type === 'function') {
-      // Компонент: отдаём его системе компонентов, она смонтируется «поверх»
-      // существующего узла и заведёт реактивный эффект для будущих обновлений.
+      // Component: hand it to the component system, which mounts "over" the
+      // existing node and sets up a reactive effect for future updates.
       hydrateComponentImpl(vnode, node)
       return node ? node.nextSibling : null
     }
@@ -470,19 +478,19 @@ export function createRenderer(options) {
     return node ? node.nextSibling : null
   }
 
-  // -- Заглушки для компонентов. Их тело подставляет слой 3 через
-  //    __installComponents, а гидратацию компонентов — слой 7.
+  // -- Stubs for components. Their bodies are supplied by layer 3 via
+  //    __installComponents, and component hydration by layer 7.
   let processComponent = () => {
-    throw new Error('Компоненты появятся в слое 3 (runtime-core/component.js)')
+    throw new Error('Components appear in layer 3 (runtime-core/component.js)')
   }
   let unmountComponent = (vnode) => hostRemove(vnode.el)
   let hydrateComponentImpl = () => {
-    throw new Error('Гидратация компонентов не подключена')
+    throw new Error('Component hydration is not wired up')
   }
 
-  // Позволяем слою компонентов «вставить» свою реализацию, не переписывая
-  // весь рендерер. Отдаём внутренние функции, которые компонентам нужны
-  // (включая hydrateNode — она нужна для гидратации поддерева компонента).
+  // Let the component layer "inject" its own implementation without rewriting the
+  // whole renderer. We hand back the internal functions components need (including
+  // hydrateNode — needed to hydrate a component's subtree).
   function __installComponents(install) {
     const api = install({ patch, unmount, render, options, mountChildren, hydrateNode })
     processComponent = api.processComponent
@@ -493,38 +501,39 @@ export function createRenderer(options) {
   return { render, hydrate, createRenderer, patch, __installComponents }
 }
 
-// Два VNode «те же самые» (можно обновлять один в другой), если совпали и тип,
-// и ключ. Разный ключ при одинаковом теге — это разные логические узлы.
+// Two VNodes are "the same" (one can be updated into the other) if both type and
+// key match. A different key with the same tag means these are different logical
+// nodes.
 function isSameVNode(n1, n2) {
   return n1.type === n2.type && n1.key === n2.key
 }
 
 // ---------------------------------------------------------------------------
-//  getSequence — наибольшая возрастающая подпоследовательность (LIS).
-//  Возвращает индексы элементов массива, которые образуют самую длинную
-//  возрастающую цепочку. В диффе это узлы, которые УЖЕ стоят в правильном
-//  относительном порядке — их можно не двигать, а двигать только остальные.
-//  Так число перемещений в DOM минимально. Реализация — классический алгоритм
-//  за O(n log n) с восстановлением пути через массив предков.
+//  getSequence — the longest increasing subsequence (LIS).
+//  Returns the indices of the array elements that form the longest increasing
+//  chain. In the diff these are the nodes that are ALREADY in the correct
+//  relative order — they can stay put while only the others are moved. This
+//  keeps the number of DOM moves minimal. The implementation is the classic
+//  O(n log n) algorithm with path reconstruction via a predecessor array.
 // ---------------------------------------------------------------------------
 function getSequence(arr) {
-  const p = arr.slice() // предки: p[i] — индекс предыдущего в цепочке для i
-  const result = [0] // индексы элементов текущей найденной цепочки
+  const p = arr.slice() // predecessors: p[i] is the index of the previous item in i's chain
+  const result = [0] // indices of the elements in the currently found chain
   let i, j, lo, hi, mid
 
   for (i = 0; i < arr.length; i++) {
     const arrI = arr[i]
-    if (arrI === 0) continue // 0 = «новый узел», в цепочку не берём
+    if (arrI === 0) continue // 0 = "new node", not taken into the chain
 
     j = result[result.length - 1]
     if (arr[j] < arrI) {
-      // arrI больше последнего — просто продлеваем цепочку.
+      // arrI is bigger than the last one — just extend the chain.
       p[i] = j
       result.push(i)
       continue
     }
 
-    // Бинарным поиском находим, какой элемент цепочки заменить на i.
+    // Binary search for which chain element to replace with i.
     lo = 0
     hi = result.length - 1
     while (lo < hi) {
@@ -538,7 +547,7 @@ function getSequence(arr) {
     }
   }
 
-  // Восстанавливаем цепочку по предкам, идя с конца.
+  // Reconstruct the chain via predecessors, walking from the end.
   let u = result.length
   let v = result[u - 1]
   while (u-- > 0) {

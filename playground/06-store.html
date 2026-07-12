@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="ru">
+<html lang="en">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>MiniVue · Слой 6: Store</title>
+    <title>MiniVue · Layer 6: Store</title>
     <style>
       body { font-family: -apple-system, system-ui, sans-serif; max-width: 640px; margin: 40px auto; padding: 0 20px; line-height: 1.6; }
       h1 { font-size: 22px; }
@@ -18,12 +18,12 @@
     </style>
   </head>
   <body>
-    <h1>MiniVue · Слой 6: Store</h1>
+    <h1>MiniVue · Layer 6: Store</h1>
     <p class="muted">
-      Два независимых компонента — «шапка» и «каталог» — делят одно состояние
-      корзины через стор. Ни props, ни emit между ними нет: оба вызывают
-      <code>useCart()</code> и получают тот же экземпляр. Счётчик в шапке
-      обновляется, когда вы добавляете товар в каталоге.
+      Two independent components — the "header" and the "catalog" — share one
+      cart state through a store. There are no props or emits between them: both
+      call <code>useCart()</code> and get the same instance. The counter in the
+      header updates when you add a product in the catalog.
     </p>
     <div id="app"></div>
 
@@ -31,7 +31,7 @@
       import { createApp, ref, computed } from '../packages/minivue.js'
       import { createPinia, defineStore, storeToRefs } from '../packages/store/index.js'
 
-      // Стор корзины в стиле setup (Composition API).
+      // Cart store in setup style (Composition API).
       const useCart = defineStore('cart', () => {
         const items = ref([])
         const count = computed(() => items.value.length)
@@ -41,7 +41,7 @@
         return { items, count, total, add, clear }
       })
 
-      // Шапка: только читает стор.
+      // Header: only reads the store.
       const Header = {
         setup: () => ({ cart: useCart() }),
         template: `
@@ -52,14 +52,14 @@
         `,
       }
 
-      // Каталог: меняет стор.
+      // Catalog: mutates the store.
       const Catalog = {
         setup() {
           const cart = useCart()
           const products = [
-            { id: 1, name: 'Клавиатура', price: 12000 },
-            { id: 2, name: 'Мышь', price: 6000 },
-            { id: 3, name: 'Монитор', price: 85000 },
+            { id: 1, name: 'Keyboard', price: 12000 },
+            { id: 2, name: 'Mouse', price: 6000 },
+            { id: 3, name: 'Monitor', price: 85000 },
           ]
           return { cart, products }
         },
@@ -67,10 +67,10 @@
           <div class="card">
             <div class="row" v-for="p in products" :key="p.id">
               <span>{{ p.name }} — {{ p.price }} ₸</span>
-              <button @click="cart.add(p)">В корзину</button>
+              <button @click="cart.add(p)">Add to cart</button>
             </div>
-            <p class="muted">В корзине {{ cart.count }} товаров на {{ cart.total }} ₸.
-              <button @click="cart.clear()">Очистить</button></p>
+            <p class="muted">{{ cart.count }} items in cart for {{ cart.total }} ₸.
+              <button @click="cart.clear()">Clear</button></p>
           </div>
         `,
       }
@@ -82,7 +82,7 @@
       }
 
       const app = createApp(App)
-      // Регистрируем компоненты глобально, чтобы шаблон нашёл <Header>/<Catalog>.
+      // Register components globally so the template can find <Header>/<Catalog>.
       app.component('Header', Header)
       app.component('Catalog', Catalog)
       app.use(createPinia())

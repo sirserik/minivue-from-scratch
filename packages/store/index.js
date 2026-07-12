@@ -1,44 +1,45 @@
 // ============================================================================
-//  store — аналог Pinia
+//  store — a Pinia-like store
 // ----------------------------------------------------------------------------
-//  Состояние компонента живёт внутри него. Но часто нужно состояние, общее для
-//  всего приложения: корзина, текущий пользователь, тема. Тащить его через props
-//  и события по всему дереву мучительно. Стор — это отдельное реактивное
-//  хранилище, к которому любой компонент обращается напрямую.
+//  A component's state lives inside it. But often you need state shared across
+//  the whole app: the cart, the current user, the theme. Threading it through
+//  props and events across the tree is painful. A store is a separate reactive
+//  container that any component can access directly.
 //
-//  Как и всё в MiniVue, стор — надстройка над реактивностью слоя 1. State — это
-//  reactive/ref, getters — computed, actions — обычные функции, меняющие state.
-//  Никакой отдельной «магии стора» нет.
+//  Like everything in MiniVue, the store is built on top of the reactivity of
+//  layer 1. State is reactive/ref, getters are computed, actions are plain
+//  functions that mutate state. There is no separate "store magic".
 // ============================================================================
 
 import { reactive, computed, inject, getCurrentInstance, watch } from '../runtime-core/index.js'
 import { proxyRefs, toRef } from '../reactivity/index.js'
 
-// Ключ для inject и «активный» стор-контейнер (на случай вызова вне setup).
+// Key for inject and the "active" Pinia container (in case it's used outside setup).
 const PINIA_KEY = Symbol('pinia')
 let activePinia = null
 export function setActivePinia(pinia) {
   activePinia = pinia
 }
 
-// ---------------------------------------------------------------------------
-//  createPinia() — контейнер всех сторов приложения. Подключается как плагин:
-//  app.use(createPinia()).
-// ---------------------------------------------------------------------------
+/**
+ * Create the Pinia container that holds all of the app's stores.
+ * Installed as a plugin: `app.use(createPinia())`.
+ * @returns {object} The Pinia instance.
+ */
 export function createPinia() {
   const pinia = {
-    _stores: new Map(), // id → готовый стор (создаётся один раз, лениво)
-    _plugins: [], // расширения (см. use ниже)
-    state: reactive({}), // общее состояние: state[id] = состояние стора id
+    _stores: new Map(), // id → ready store (created once, lazily)
+    _plugins: [], // extensions (see use below)
+    state: reactive({}), // shared state: state[id] = state of store id
 
-    // Регистрация плагина стора. Плагин получает { store, pinia, id } и может
-    // что-то к стору добавить (логирование, персист и т.п.).
+    // Register a store plugin. The plugin receives { store, pinia, id } and can
+    // add something to the store (logging, persistence, etc.).
     use(plugin) {
       pinia._plugins.push(plugin)
       return pinia
     },
 
-    // Подключение к приложению.
+    // Install into the app.
     install(app) {
       setActivePinia(pinia)
       app.provide(PINIA_KEY, pinia)
@@ -48,38 +49,40 @@ export function createPinia() {
   return pinia
 }
 
-// Достать активный контейнер: в setup — через inject, иначе — глобальный.
+// Get the active container: inside setup via inject, otherwise the global one.
 function getActivePinia() {
   const fromInject = getCurrentInstance() ? inject(PINIA_KEY, null) : null
   return fromInject || activePinia
 }
 
-// ---------------------------------------------------------------------------
-//  defineStore — объявить стор. Два стиля:
-//
-//   1) Options — как во Vue Options API:
-//      defineStore('counter', {
-//        state: () => ({ count: 0 }),
-//        getters: { double: (s) => s.count * 2 },
-//        actions: { inc() { this.count++ } },
-//      })
-//
-//   2) Setup — как Composition API:
-//      defineStore('counter', () => {
-//        const count = ref(0)
-//        const double = computed(() => count.value * 2)
-//        const inc = () => count.value++
-//        return { count, double, inc }
-//      })
-//
-//  Возвращает функцию useStore(), которая при первом вызове создаёт стор, а
-//  дальше отдаёт тот же самый экземпляр (стор — одиночка на приложение).
-// ---------------------------------------------------------------------------
+/**
+ * Define a store. Two styles are supported:
+ *
+ *   1) Options — like the Vue Options API:
+ *      defineStore('counter', {
+ *        state: () => ({ count: 0 }),
+ *        getters: { double: (s) => s.count * 2 },
+ *        actions: { inc() { this.count++ } },
+ *      })
+ *
+ *   2) Setup — like the Composition API:
+ *      defineStore('counter', () => {
+ *        const count = ref(0)
+ *        const double = computed(() => count.value * 2)
+ *        const inc = () => count.value++
+ *        return { count, double, inc }
+ *      })
+ *
+ * @param {string} id - Unique store id.
+ * @param {Function|object} setupOrOptions - A setup function or an options object.
+ * @returns {Function} A useStore() function that creates the store on first call
+ *   and returns the same instance afterwards (a store is an app-wide singleton).
+ */
 export function defineStore(id, setupOrOptions) {
   function useStore() {
     const pinia = getActivePinia()
     if (!pinia) {
-      throw new Error('Pinia не установлена: вызовите app.use(createPinia())')
+      throw new Error('Pinia is not installed: call app.use(createPinia())')
     }
     if (!pinia._stores.has(id)) {
       createStore(id, setupOrOptions, pinia)
@@ -90,33 +93,33 @@ export function defineStore(id, setupOrOptions) {
   return useStore
 }
 
-// Создать и зарегистрировать стор.
+// Create and register a store.
 function createStore(id, setupOrOptions, pinia) {
-  let store // ссылка на итоговый стор — нужна getters/actions как this
+  let store // reference to the final store — needed by getters/actions as `this`
 
   const isSetupStyle = typeof setupOrOptions === 'function'
   const setup = isSetupStyle
     ? setupOrOptions
     : optionsToSetup(id, setupOrOptions, pinia, () => store)
 
-  // parts — объект из ref/computed/функций. proxyRefs разворачивает .value,
-  // поэтому снаружи пишут store.count, а не store.count.value.
+  // parts — an object of ref/computed/functions. proxyRefs unwraps .value,
+  // so from the outside you write store.count, not store.count.value.
   const parts = setup()
   store = proxyRefs(parts)
   store.$id = id
-  store._parts = parts // пригодится для storeToRefs
+  store._parts = parts // useful for storeToRefs
 
-  // $state — прямой доступ к реактивному состоянию (для options-сторов).
+  // $state — direct access to the reactive state (for options stores).
   if (pinia.state[id]) {
     Object.defineProperty(store, '$state', { get: () => pinia.state[id] })
   }
 
-  // Служебные методы стора: $patch / $subscribe / $reset.
+  // Store utility methods: $patch / $subscribe / $reset.
   addStoreApi(store, id, pinia, isSetupStyle ? null : setupOrOptions)
 
   pinia._stores.set(id, store)
 
-  // Прогоняем плагины стора: то, что они вернут, домешиваем в стор.
+  // Run the store plugins: whatever they return is merged into the store.
   for (const plugin of pinia._plugins) {
     const extension = plugin({ store, pinia, id })
     if (extension) Object.assign(store, extension)
@@ -125,11 +128,11 @@ function createStore(id, setupOrOptions, pinia) {
   return store
 }
 
-// Навесить служебные методы, начинающиеся с $ (как в Pinia).
+// Attach the utility methods that start with $ (as in Pinia).
 function addStoreApi(store, id, pinia, options) {
-  const stateTarget = pinia.state[id] || store // options → реактивный state, setup → сам стор
+  const stateTarget = pinia.state[id] || store // options → reactive state, setup → the store itself
 
-  // $patch — групповое изменение: объектом (частичное слияние) или функцией.
+  // $patch — batched change: an object (partial merge) or a function.
   //   store.$patch({ count: 5 })
   //   store.$patch((s) => { s.count++; s.done = true })
   store.$patch = (partialOrFn) => {
@@ -137,15 +140,15 @@ function addStoreApi(store, id, pinia, options) {
     else Object.assign(stateTarget, partialOrFn)
   }
 
-  // $subscribe — вызвать колбэк при любом изменении состояния стора.
+  // $subscribe — call the callback on any change to the store's state.
   store.$subscribe = (callback) => {
     if (pinia.state[id]) {
-      // options-стор: следим за реактивным состоянием (watch по reactive глубок).
+      // options store: watch the reactive state (watch over reactive is deep).
       return watch(pinia.state[id], () => callback(store))
     }
-    // setup-стор: следим только за ref-полями СОСТОЯНИЯ. computed исключаем
-    // (у него есть .effect) — иначе одно изменение состояния сработало бы дважды:
-    // и от самого ref, и от зависящего от него computed.
+    // setup store: watch only the STATE ref fields. We exclude computed
+    // (it has an .effect) — otherwise a single state change would fire twice:
+    // once from the ref itself and once from the computed that depends on it.
     const stateKeys = Object.keys(store._parts).filter((k) => {
       const v = store._parts[k]
       return v && v.__isRef && !v.effect
@@ -156,35 +159,35 @@ function addStoreApi(store, id, pinia, options) {
     )
   }
 
-  // $reset — вернуть состояние к начальному (только для options-сторов, где мы
-  // знаем функцию state(), которой можно получить свежие значения).
+  // $reset — restore the state to its initial value (only for options stores,
+  // where we know the state() function that produces fresh values).
   store.$reset = () => {
     if (!options || !options.state) {
-      console.warn(`$reset доступен только для options-стора (id: ${id})`)
+      console.warn(`$reset is only available for an options store (id: ${id})`)
       return
     }
     Object.assign(pinia.state[id], options.state())
   }
 }
 
-// Превратить options-описание в setup-функцию — так у нас один путь создания.
+// Turn an options description into a setup function — so there's one creation path.
 function optionsToSetup(id, options, pinia, getStore) {
   return function setup() {
-    // Состояние храним в общем контейнере pinia.state[id] — реактивное.
+    // State is kept in the shared container pinia.state[id] — reactive.
     const state = reactive(options.state ? options.state() : {})
     pinia.state[id] = state
 
     const parts = {}
-    // Каждое поле состояния отдаём как ref, связанный с общим состоянием.
+    // Expose each state field as a ref bound to the shared state.
     for (const key in state) {
       parts[key] = toRef(state, key)
     }
-    // getters → computed. this и первый аргумент — сам стор.
+    // getters → computed. `this` and the first argument are the store itself.
     for (const name in options.getters || {}) {
       const getterFn = options.getters[name]
       parts[name] = computed(() => getterFn.call(getStore(), getStore()))
     }
-    // actions → функции с this = стор.
+    // actions → functions with this = the store.
     for (const name in options.actions || {}) {
       const actionFn = options.actions[name]
       parts[name] = function (...args) {
@@ -195,19 +198,20 @@ function optionsToSetup(id, options, pinia, getStore) {
   }
 }
 
-// ---------------------------------------------------------------------------
-//  storeToRefs(store) — превратить поля стора обратно в ref'ы.
-//  Нужно, чтобы деструктуризация не рвала реактивность:
-//    const { count, double } = storeToRefs(store)  // count.value реактивен
-//  Actions при этом берут прямо из стора: const { inc } = store.
-// ---------------------------------------------------------------------------
+/**
+ * Turn a store's fields back into refs so destructuring doesn't break reactivity:
+ *   const { count, double } = storeToRefs(store)  // count.value stays reactive
+ * Actions are taken straight from the store instead: const { inc } = store.
+ * @param {object} store - The store instance.
+ * @returns {Object<string, object>} A map of field name → ref.
+ */
 export function storeToRefs(store) {
   const refs = {}
   for (const key in store._parts) {
     const value = store._parts[key]
-    // Пропускаем функции (actions) — их деструктурируют напрямую из стора.
+    // Skip functions (actions) — those are destructured directly from the store.
     if (typeof value === 'function' && !value.__isRef) continue
-    // toRef(store, key) читает/пишет store[key], сохраняя реактивную связь.
+    // toRef(store, key) reads/writes store[key], preserving the reactive link.
     refs[key] = toRef(store, key)
   }
   return refs

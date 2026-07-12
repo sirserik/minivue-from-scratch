@@ -1,19 +1,19 @@
 // ============================================================================
-//  minivue.js — «полная сборка» фреймворка (один импорт на всё)
+//  minivue.js — the "full build" of the framework (one import for everything)
 // ----------------------------------------------------------------------------
-//  Это аналог главного пакета `vue` у настоящего Vue: рантайм для браузера ПЛЮС
-//  компилятор шаблонов. Достаточно импортировать отсюда — и компоненты смогут
-//  пользоваться свойством template, потому что импорт компилятора регистрирует
-//  его в рантайме (побочный эффект строки ниже).
+//  This is the counterpart of real Vue's main `vue` package: the browser
+//  runtime PLUS the template compiler. Importing from here is enough — and
+//  components can use the template option, because importing the compiler
+//  registers it with the runtime (a side effect of the line below).
 //
 //    import { createApp, ref } from '../packages/minivue.js'
 // ============================================================================
 
-// Побочный эффект: регистрирует compile() в рантайме (registerRuntimeCompiler).
+// Side effect: registers compile() with the runtime (registerRuntimeCompiler).
 import './compiler/index.js'
 
-// Весь публичный API браузерного рантайма.
+// The entire public API of the browser runtime.
 export * from './runtime-dom/index.js'
 
-// И сам компилятор — на случай, если нужно скомпилировать шаблон вручную.
+// And the compiler itself — in case you need to compile a template manually.
 export { compile } from './compiler/index.js'

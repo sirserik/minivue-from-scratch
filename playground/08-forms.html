@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="ru">
+<html lang="en">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>MiniVue · Слой 8: Формы и привязки</title>
+    <title>MiniVue · Layer 8: Forms and Bindings</title>
     <style>
       body { font-family: -apple-system, system-ui, sans-serif; max-width: 640px; margin: 40px auto; padding: 0 20px; line-height: 1.6; }
       h1 { font-size: 22px; }
@@ -20,11 +20,11 @@
     </style>
   </head>
   <body>
-    <h1>MiniVue · Слой 8: Формы и привязки</h1>
+    <h1>MiniVue · Layer 8: Forms and Bindings</h1>
     <p class="muted">
-      <code>v-model</code> связывает поля с состоянием в обе стороны, <code>:class</code>
-      принимает объект, <code>@submit.prevent</code> и <code>@keyup.enter</code> —
-      модификаторы событий. Поля и «живое состояние» ниже всегда синхронны.
+      <code>v-model</code> binds fields to state two-way, <code>:class</code>
+      accepts an object, <code>@submit.prevent</code> and <code>@keyup.enter</code> are
+      event modifiers. The fields and the "live state" below always stay in sync.
     </p>
     <div id="app"></div>
 
@@ -35,7 +35,7 @@
         setup() {
           const form = reactive({ name: '', role: 'user', subscribe: true })
           const greeting = computed(() =>
-            form.name ? `Привет, ${form.name}!` : 'Введите имя',
+            form.name ? `Hello, ${form.name}!` : 'Enter a name',
           )
           const submitted = reactive({ value: null })
           const submit = () => (submitted.value = JSON.stringify(form, null, 2))
@@ -44,35 +44,35 @@
         template: `
           <div class="card">
             <form @submit.prevent="submit">
-              <label>Имя (v-model + @keyup.enter)</label>
+              <label>Name (v-model + @keyup.enter)</label>
               <input type="text" v-model="form.name" @keyup.enter="submit"
-                     placeholder="Наберите и нажмите Enter" />
+                     placeholder="Type and press Enter" />
 
-              <label>Роль (v-model на select)</label>
+              <label>Role (v-model on select)</label>
               <select v-model="form.role">
-                <option value="user">Пользователь</option>
-                <option value="admin">Администратор</option>
+                <option value="user">User</option>
+                <option value="admin">Administrator</option>
               </select>
 
               <label>
                 <input type="checkbox" v-model="form.subscribe" />
-                Подписка (v-model на чекбоксе)
+                Subscription (v-model on checkbox)
               </label>
 
               <p>
-                <!-- :class объектом: класс включается по условию -->
+                <!-- :class as object: class toggled by condition -->
                 <span class="tag" :class="{ on: form.subscribe, off: !form.subscribe }">
-                  {{ form.subscribe ? 'подписан' : 'без подписки' }}
+                  {{ form.subscribe ? 'subscribed' : 'not subscribed' }}
                 </span>
               </p>
 
               <p class="muted">{{ greeting }}</p>
-              <button type="submit">Отправить (Enter тоже работает)</button>
+              <button type="submit">Submit (Enter works too)</button>
             </form>
           </div>
 
           <div class="card" v-if="submitted.value">
-            <strong>Отправлено:</strong>
+            <strong>Submitted:</strong>
             <pre>{{ submitted.value }}</pre>
           </div>
         `,

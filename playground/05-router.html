@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="ru">
+<html lang="en">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>MiniVue · Слой 5: Router</title>
+    <title>MiniVue · Layer 5: Router</title>
     <style>
       body { font-family: -apple-system, system-ui, sans-serif; max-width: 640px; margin: 40px auto; padding: 0 20px; line-height: 1.6; }
       h1 { font-size: 22px; }
@@ -16,12 +16,13 @@
     </style>
   </head>
   <body>
-    <h1>MiniVue · Слой 5: Router</h1>
+    <h1>MiniVue · Layer 5: Router</h1>
     <p class="muted">
-      Мультистраничное SPA без перезагрузки. <code>RouterLink</code> меняет адрес
-      (режим hash: <code>#/about</code>), <code>RouterView</code> показывает
-      компонент текущего маршрута. Параметр <code>:id</code> прилетает в компонент
-      через <code>useRoute()</code>. Смотрите на адресную строку при переходах.
+      A multi-page SPA without reloads. <code>RouterLink</code> changes the URL
+      (hash mode: <code>#/about</code>), <code>RouterView</code> renders the
+      component for the current route. The <code>:id</code> param reaches the
+      component through <code>useRoute()</code>. Watch the address bar as you
+      navigate.
     </p>
     <div id="app"></div>
 
@@ -33,14 +34,14 @@
         useRoute,
       } from '../packages/router/index.js'
 
-      const Home = { template: '<div class="card"><h2>Главная</h2><p>Добро пожаловать в MiniVue.</p></div>' }
-      const About = { template: '<div class="card"><h2>О проекте</h2><p>Учебный аналог Vue, собранный с нуля.</p></div>' }
+      const Home = { template: '<div class="card"><h2>Home</h2><p>Welcome to MiniVue.</p></div>' }
+      const About = { template: '<div class="card"><h2>About</h2><p>A teaching clone of Vue, built from scratch.</p></div>' }
       const User = {
         setup: () => ({ route: useRoute() }),
         template: `
           <div class="card">
-            <h2>Пользователь #{{ route.params.id }}</h2>
-            <p>Параметр :id взят из адреса через useRoute().</p>
+            <h2>User #{{ route.params.id }}</h2>
+            <p>The :id param is taken from the URL via useRoute().</p>
           </div>
         `,
       }
@@ -58,10 +59,10 @@
         template: `
           <div>
             <nav>
-              <RouterLink to="/">Главная</RouterLink>
-              <RouterLink to="/about">О проекте</RouterLink>
-              <RouterLink to="/user/7">Пользователь 7</RouterLink>
-              <RouterLink to="/user/99">Пользователь 99</RouterLink>
+              <RouterLink to="/">Home</RouterLink>
+              <RouterLink to="/about">About</RouterLink>
+              <RouterLink to="/user/7">User 7</RouterLink>
+              <RouterLink to="/user/99">User 99</RouterLink>
             </nav>
             <RouterView />
           </div>

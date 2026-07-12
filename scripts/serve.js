@@ -1,10 +1,10 @@
-// Крошечный статический сервер на голом Node — чтобы открывать playground.
-// Зачем вообще сервер, если это просто HTML? Браузер запрещает импорт ES-модулей
-// (import ... from) со схемы file://. Нужен http://, поэтому раздаём папку
-// проекта по http. Никаких зависимостей — только встроенные модули Node.
+// A tiny static server on bare Node — for opening the playground.
+// Why a server at all if it's just HTML? The browser forbids importing ES modules
+// (import ... from) from the file:// scheme. We need http://, so we serve the
+// project folder over http. No dependencies — only Node's built-in modules.
 //
-// Запуск:  node scripts/serve.js       (по умолчанию порт 5173)
-// Открыть: http://localhost:5173/playground/01-reactivity.html
+// Run:   node scripts/serve.js       (default port 5173)
+// Open:  http://localhost:5173/playground/01-reactivity.html
 import http from 'node:http'
 import fs from 'node:fs'
 import path from 'node:path'
@@ -23,7 +23,7 @@ const MIME = {
 }
 
 const server = http.createServer((req, res) => {
-  // Отрезаем query-строку и защищаемся от выхода за пределы папки проекта.
+  // Strip the query string and guard against escaping the project folder.
   let urlPath = decodeURIComponent(req.url.split('?')[0])
   if (urlPath === '/') urlPath = '/playground/index.html'
   const filePath = path.join(ROOT, path.normalize(urlPath))
@@ -38,8 +38,8 @@ const server = http.createServer((req, res) => {
       return res.end('404: ' + urlPath)
     }
     const type = MIME[path.extname(filePath)] || 'application/octet-stream'
-    // no-store — чтобы браузер НИКОГДА не кэшировал модули. Иначе после правок
-    // подтягивается смесь старых и новых версий → трудноуловимые баги.
+    // no-store — so the browser NEVER caches the modules. Otherwise, after edits,
+    // a mix of old and new versions gets pulled in → hard-to-track bugs.
     res.writeHead(200, {
       'Content-Type': type,
       'Cache-Control': 'no-store, no-cache, must-revalidate',

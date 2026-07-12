@@ -1,10 +1,10 @@
-// Фейковый «DOM» для тестов рендерера. Реализует тот же набор операций, что и
-// браузерный nodeOps/patchProp, но строит обычное JS-дерево в памяти. Так мы
-// проверяем алгоритм diff без браузера — и заодно доказываем, что рендерер
-// действительно платформо-независим.
+// Fake "DOM" for the renderer tests. It implements the same set of operations
+// as the browser's nodeOps/patchProp, but builds a plain in-memory JS tree.
+// This lets us test the diff algorithm without a browser — and also proves the
+// renderer really is platform-independent.
 import { normalizeClass, styleToString } from '../../packages/shared.js'
 
-// Узлы — простые объекты. type: 'element' | 'text'.
+// Nodes are plain objects. type: 'element' | 'text'.
 function createElement(tag) {
   return { type: 'element', tag, props: {}, events: {}, children: [], parent: null }
 }
@@ -15,7 +15,7 @@ function setText(node, text) {
   node.text = String(text)
 }
 function setElementText(el, text) {
-  // Аналог textContent: заменяет всё содержимое одним текстом.
+  // Like textContent: replaces all content with a single text node.
   el.children = text === '' ? [] : [{ type: 'text', text: String(text), parent: el }]
 }
 function detach(node) {
@@ -27,7 +27,7 @@ function detach(node) {
   node.parent = null
 }
 function insert(child, parent, anchor = null) {
-  // Поддержка перемещения: если узел уже где-то был, сначала вынимаем.
+  // Move support: if the node already lived somewhere, detach it first.
   detach(child)
   child.parent = parent
   if (anchor == null) {
@@ -42,14 +42,14 @@ function remove(child) {
 }
 function patchProp(el, key, prev, next) {
   if (/^on[A-Z]/.test(key)) {
-    // Обработчики складываем отдельно, чтобы в тесте их вызывать вручную.
+    // Store handlers separately so the test can call them manually.
     const name = key.slice(2).toLowerCase()
     if (next) el.events[name] = next
     else delete el.events[name]
     return
   }
-  // class/style нормализуем так же, как браузерный patchProp, — чтобы в DOM
-  // лежали строки (объект/массив → строка), как на реальной странице.
+  // Normalize class/style just like the browser patchProp — so the DOM holds
+  // strings (object/array → string), as on a real page.
   if (key === 'class') {
     const c = normalizeClass(next)
     if (c) el.props.class = c
@@ -82,12 +82,12 @@ export const testOptions = {
   },
 }
 
-// Корневой контейнер для рендера.
+// Root container for rendering.
 export function createRoot() {
   return { type: 'element', tag: 'root', props: {}, events: {}, children: [], parent: null }
 }
 
-// Сериализация дерева в HTML-подобную строку — для наглядных проверок.
+// Serialize the tree into an HTML-like string — for readable assertions.
 export function serialize(node) {
   if (node.type === 'text') return node.text
   const attrs = Object.keys(node.props)
@@ -99,7 +99,7 @@ export function serialize(node) {
   return `<${node.tag}${attrs}>${inner}</${node.tag}>`
 }
 
-// Найти первый узел, у которого props.id === id (для проверки идентичности).
+// Find the first node whose props.id === id (for identity checks).
 export function findById(node, id) {
   if (node.type === 'element' && node.props.id === id) return node
   for (const c of node.children || []) {

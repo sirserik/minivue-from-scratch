@@ -1,41 +1,49 @@
 // ============================================================================
-//  patchProp.js — как выставить одно свойство на реальном элементе
+//  patchProp.js — how to apply a single prop to a real element
 // ----------------------------------------------------------------------------
-//  Рендерер зовёт patchProp(el, key, prevValue, nextValue) на каждый атрибут.
-//  «Свойства» бывают очень разными: обычные атрибуты (id, class), обработчики
-//  событий (onClick), стили (style), булевы значения. Здесь мы решаем, как
-//  именно применить каждое из них к DOM.
+//  The renderer calls patchProp(el, key, prevValue, nextValue) for each prop.
+//  "Props" come in very different flavors: plain attributes (id, class), event
+//  handlers (onClick), styles (style), boolean values. Here we decide how
+//  exactly to apply each of them to the DOM.
 // ============================================================================
 
 import { normalizeClass, normalizeStyle, camelToKebab } from '../shared.js'
 
+/**
+ * Apply a single prop to a real DOM element, dispatching by prop kind
+ * (class, style, event handler, or plain attribute).
+ * @param {Element} el - Target DOM element.
+ * @param {string} key - Prop name (e.g. 'class', 'style', 'onClick', 'id').
+ * @param {*} prevValue - Previous value, used to remove the old event/style.
+ * @param {*} nextValue - New value to apply.
+ */
 export function patchProp(el, key, prevValue, nextValue) {
   if (key === 'class') {
-    // class может прийти строкой, массивом или объектом — приводим к строке.
+    // class may arrive as a string, array, or object — coerce to a string.
     el.className = normalizeClass(nextValue)
   } else if (key === 'style') {
     patchStyle(el, prevValue, nextValue)
   } else if (isEventKey(key)) {
-    // onClick, onInput и т.п. — это обработчики событий.
+    // onClick, onInput, etc. — these are event handlers.
     patchEvent(el, key, prevValue, nextValue)
   } else {
     patchAttr(el, key, nextValue)
   }
 }
 
-// Ключ-обработчик события: начинается с 'on' и дальше заглавная буква (onClick).
+// Event-handler key: starts with 'on' followed by an uppercase letter (onClick).
 function isEventKey(key) {
   return /^on[A-Z]/.test(key)
 }
 
-// onClick → 'click'. Отрезаем 'on' и переводим в нижний регистр.
+// onClick → 'click'. Strip 'on' and lowercase the rest.
 function eventName(key) {
   return key.slice(2).toLowerCase()
 }
 
 function patchEvent(el, key, prevValue, nextValue) {
   const name = eventName(key)
-  // Снимаем старый обработчик, если он был, и вешаем новый.
+  // Remove the old handler if there was one, then attach the new one.
   if (prevValue) el.removeEventListener(name, prevValue)
   if (nextValue) el.addEventListener(name, nextValue)
 }
@@ -43,25 +51,26 @@ function patchEvent(el, key, prevValue, nextValue) {
 function patchStyle(el, prev, next) {
   const nextObj = normalizeStyle(next)
   const prevObj = normalizeStyle(prev)
-  // Ставим/обновляем новые свойства стиля (kebab-case через setProperty).
+  // Set/update the new style properties (kebab-case via setProperty).
   for (const name in nextObj) {
     el.style.setProperty(camelToKebab(name), nextObj[name])
   }
-  // Убираем те, что были, но исчезли.
+  // Remove the ones that existed before but are now gone.
   for (const name in prevObj) {
     if (nextObj[name] == null) el.style.removeProperty(camelToKebab(name))
   }
 }
 
 function patchAttr(el, key, nextValue) {
-  // Для value/checked у полей ввода пишем в СВОЙСТВО напрямую, иначе браузер не
-  // обновит уже отрисованное поле (атрибут задаёт лишь начальное значение).
+  // For value/checked on input fields we write to the PROPERTY directly,
+  // otherwise the browser won't update an already-rendered field (the attribute
+  // only sets the initial value).
   if ((key === 'value' || key === 'checked') && key in el) {
     el[key] = key === 'checked' ? !!nextValue : nextValue == null ? '' : nextValue
     return
   }
   if (nextValue == null || nextValue === false) {
-    // null / undefined / false — атрибут надо убрать.
+    // null / undefined / false — the attribute must be removed.
     el.removeAttribute(key)
   } else {
     el.setAttribute(key, nextValue === true ? '' : nextValue)

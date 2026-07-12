@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="ru">
+<html lang="en">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>MiniVue · Капстоун: заметки</title>
+    <title>MiniVue · Capstone: notes</title>
     <style>
       body { font-family: -apple-system, system-ui, sans-serif; max-width: 680px; margin: 40px auto; padding: 0 20px; line-height: 1.6; color: #1c1e21; }
       h1 { font-size: 22px; }
@@ -23,11 +23,11 @@
     </style>
   </head>
   <body>
-    <h1>MiniVue — итоговое приложение «Заметки»</h1>
+    <h1>MiniVue — final "Notes" application</h1>
     <p class="muted">
-      Здесь работает всё сразу: роутер (список/деталь/о программе), стор (Pinia-аналог
-      с $subscribe), формы с v-model, Teleport для модалки удаления. Всё — на нашем
-      фреймворке, собранном с нуля.
+      Everything works together here: the router (list/detail/about), the store (a Pinia
+      analogue with $subscribe), forms with v-model, and Teleport for the delete modal.
+      All of it runs on our framework, built from scratch.
     </p>
     <div id="app"></div>
     <div id="modals"></div>
@@ -42,12 +42,12 @@
         useRouter,
       } from '../packages/router/index.js'
 
-      // --- Стор заметок (setup-стиль) -------------------------------------
+      // --- Notes store (setup style) --------------------------------------
       const useNotes = defineStore('notes', () => {
         let nextId = 3
         const items = ref([
-          { id: 1, title: 'Понять реактивность', body: 'ref, effect, track/trigger' },
-          { id: 2, title: 'Собрать рендерер', body: 'vnode + diff' },
+          { id: 1, title: 'Understand reactivity', body: 'ref, effect, track/trigger' },
+          { id: 2, title: 'Build the renderer', body: 'vnode + diff' },
         ])
         const count = computed(() => items.value.length)
         const add = (title) => {
@@ -63,7 +63,7 @@
         return { items, count, add, update, remove, byId }
       })
 
-      // --- Список (маршрут /) ---------------------------------------------
+      // --- List (route /) -------------------------------------------------
       const NoteList = {
         setup() {
           const notes = useNotes()
@@ -81,11 +81,11 @@
           <div>
             <div class="card">
               <div class="note-row" style="gap:8px">
-                <input v-model="draft" @keyup.enter="addNote" placeholder="Новая заметка…" />
-                <button class="primary" @click="addNote">Добавить</button>
+                <input v-model="draft" @keyup.enter="addNote" placeholder="New note…" />
+                <button class="primary" @click="addNote">Add</button>
               </div>
             </div>
-            <p class="muted">Всего заметок: <span class="pill">{{ count }}</span></p>
+            <p class="muted">Total notes: <span class="pill">{{ count }}</span></p>
             <div class="card note-row" v-for="n in items" :key="n.id">
               <RouterLink :to="'/note/' + n.id">{{ n.title }}</RouterLink>
             </div>
@@ -93,7 +93,7 @@
         `,
       }
 
-      // --- Деталь/редактирование (маршрут /note/:id) ----------------------
+      // --- Detail/editing (route /note/:id) -------------------------------
       const NoteDetail = {
         setup() {
           const route = useRoute()
@@ -111,36 +111,36 @@
         },
         template: `
           <div v-if="note" class="card">
-            <label class="muted">Заголовок</label>
+            <label class="muted">Title</label>
             <input :value="note.title" @input="onTitle" />
-            <label class="muted" style="margin-top:10px;display:block">Текст</label>
+            <label class="muted" style="margin-top:10px;display:block">Text</label>
             <textarea :value="note.body" @input="onBody" rows="4"></textarea>
             <div class="note-row" style="margin-top:14px">
-              <RouterLink to="/">← К списку</RouterLink>
-              <button class="danger" @click="showConfirm = true">Удалить</button>
+              <RouterLink to="/">← Back to list</RouterLink>
+              <button class="danger" @click="showConfirm = true">Delete</button>
             </div>
 
             <Teleport to="#modals">
               <div class="backdrop" v-if="showConfirm" @click.self="showConfirm = false">
                 <div class="modal">
-                  <h3>Удалить заметку?</h3>
-                  <p class="muted">«{{ note.title }}» — действие необратимо.</p>
+                  <h3>Delete note?</h3>
+                  <p class="muted">"{{ note.title }}" — this action cannot be undone.</p>
                   <div class="note-row">
-                    <button @click="showConfirm = false">Отмена</button>
-                    <button class="danger" @click="del">Удалить</button>
+                    <button @click="showConfirm = false">Cancel</button>
+                    <button class="danger" @click="del">Delete</button>
                   </div>
                 </div>
               </div>
             </Teleport>
           </div>
-          <div v-else class="card">Заметка не найдена. <RouterLink to="/">К списку</RouterLink></div>
+          <div v-else class="card">Note not found. <RouterLink to="/">Back to list</RouterLink></div>
         `,
       }
 
       const About = {
         template: `<div class="card">
-          <p>Это демо построено на MiniVue — учебной реализации Vue 3 с нуля.</p>
-          <p class="muted">Роутер, стор, формы, Teleport — всё своё.</p>
+          <p>This demo is built on MiniVue — an educational implementation of Vue 3 from scratch.</p>
+          <p class="muted">Router, store, forms, Teleport — all our own.</p>
         </div>`,
       }
 
@@ -155,16 +155,16 @@
 
       const App = {
         setup() {
-          // Демонстрируем $subscribe: логируем изменения стора в консоль.
+          // Demonstrate $subscribe: log store changes to the console.
           const notes = useNotes()
-          notes.$subscribe(() => console.log('[store] заметки изменились:', notes.count))
+          notes.$subscribe(() => console.log('[store] notes changed:', notes.count))
           return {}
         },
         template: `
           <div>
             <nav>
-              <RouterLink to="/">Заметки</RouterLink>
-              <RouterLink to="/about">О программе</RouterLink>
+              <RouterLink to="/">Notes</RouterLink>
+              <RouterLink to="/about">About</RouterLink>
             </nav>
             <RouterView />
           </div>

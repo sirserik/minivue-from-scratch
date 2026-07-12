@@ -1,18 +1,28 @@
 // ============================================================================
-//  apiCreateApp.js — создание приложения
+//  apiCreateApp.js — application creation
 // ----------------------------------------------------------------------------
-//  createApp(RootComponent).mount('#app') — точка входа любого Vue-приложения.
-//  app — это тонкая обёртка вокруг render(): она хранит корневой компонент,
-//  общий на приложение контекст (для provide и плагинов) и умеет смонтироваться
-//  в контейнер. Роутер и стор из следующих слоёв подключаются через app.use().
+//  createApp(RootComponent).mount('#app') — the entry point of any Vue app.
+//  app is a thin wrapper around render(): it holds the root component, an
+//  app-wide context (for provide and plugins), and knows how to mount into a
+//  container. The router and store from later layers plug in via app.use().
 // ============================================================================
 
 import { createVNode } from './vnode.js'
 import { createAppContext } from './component.js'
 
-// Фабрика: получает функцию render конкретной платформы (браузерную из
-// runtime-dom) и возвращает createApp, умеющий этой render пользоваться.
+/**
+ * Factory: takes a platform-specific render function (the browser one from
+ * runtime-dom) and returns a createApp that uses that render.
+ * @param {(vnode: any, container: any) => void} render Platform render function.
+ * @returns {(rootComponent: object, rootProps?: object|null) => object} The createApp function.
+ */
 export function createAppAPI(render) {
+  /**
+   * Create an application instance rooted at the given component.
+   * @param {object} rootComponent The root component definition.
+   * @param {object|null} [rootProps] Props passed to the root component.
+   * @returns {object} The app instance (use/provide/component/directive/mount/unmount).
+   */
   return function createApp(rootComponent, rootProps = null) {
     const context = createAppContext()
     let isMounted = false
@@ -21,36 +31,35 @@ export function createAppAPI(render) {
     const app = {
       _context: context,
       _component: rootComponent,
-      // config с globalProperties — сюда плагины (router, pinia) кладут $router,
-      // $route, $pinia. Один объект на всё приложение.
+      // config.globalProperties — where plugins (router, pinia) put $router,
+      // $route, $pinia. A single object for the whole app.
       config: context.config,
 
-      // Подключить плагин. Плагин — объект с методом install(app) или просто
-      // функция. Так работают router и pinia: app.use(router).
+      // Install a plugin. A plugin is an object with an install(app) method or
+      // just a function. This is how router and pinia work: app.use(router).
       use(plugin, ...options) {
         if (plugin && typeof plugin.install === 'function') {
           plugin.install(app, ...options)
         } else if (typeof plugin === 'function') {
           plugin(app, ...options)
         }
-        return app // чтобы вызовы можно было сцеплять: app.use(a).use(b)
+        return app // so calls can be chained: app.use(a).use(b)
       },
 
-      // Дать значение на уровне всего приложения — его сможет inject любой
-      // компонент дерева.
+      // Provide a value at the app level — any component in the tree can inject it.
       provide(key, value) {
         context.provides[key] = value
         return app
       },
 
-      // Зарегистрировать глобальный компонент по имени (упрощённо).
+      // Register a global component by name (simplified).
       component(name, comp) {
         if (!comp) return context.components[name]
         context.components[name] = comp
         return app
       },
 
-      // Зарегистрировать глобальную директиву (v-focus и т.п.).
+      // Register a global directive (v-focus, etc.).
       directive(name, def) {
         if (!def) return context.directives[name]
         context.directives[name] = def
@@ -64,14 +73,14 @@ export function createAppAPI(render) {
             ? document.querySelector(containerOrSelector)
             : containerOrSelector
 
-        // Оборачиваем корневой компонент в vnode и цепляем к нему контекст
-        // приложения — дальше он унаследуется всем деревом.
+        // Wrap the root component in a vnode and attach the app context to it —
+        // from here it is inherited by the whole tree.
         const vnode = createVNode(rootComponent, rootProps)
         vnode.appContext = context
 
         render(vnode, rootContainer)
         isMounted = true
-        return vnode.component // инстанс корня (пригодится для тестов/отладки)
+        return vnode.component // the root instance (handy for tests/debugging)
       },
 
       unmount() {

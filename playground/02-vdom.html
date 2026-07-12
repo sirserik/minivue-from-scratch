@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="ru">
+<html lang="en">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>MiniVue · Слой 2: Virtual DOM</title>
+    <title>MiniVue · Layer 2: Virtual DOM</title>
     <style>
       body { font-family: -apple-system, system-ui, sans-serif; max-width: 720px; margin: 40px auto; padding: 0 20px; line-height: 1.6; }
       h1 { font-size: 22px; }
@@ -17,21 +17,21 @@
     </style>
   </head>
   <body>
-    <h1>MiniVue · Слой 2: Virtual DOM + diff</h1>
+    <h1>MiniVue · Layer 2: Virtual DOM + diff</h1>
     <p class="muted">
-      Соединяем слой 1 (реактивность) и слой 2 (рендерер). Один <code>effect</code>
-      строит дерево <code>h(...)</code> из состояния и вызывает <code>render</code>.
-      При изменении данных рендерер сам находит минимальную правку — открыв
-      инспектор, видно, что при перестановке списка узлы <code>&lt;li&gt;</code>
-      двигаются, а не пересоздаются.
+      We connect layer 1 (reactivity) and layer 2 (the renderer). A single <code>effect</code>
+      builds an <code>h(...)</code> tree from state and calls <code>render</code>.
+      When the data changes, the renderer finds the minimal edit itself — open
+      the inspector and you can see that reordering the list makes the <code>&lt;li&gt;</code>
+      nodes move rather than being recreated.
     </p>
 
     <div class="card" id="app"></div>
 
     <div class="card">
-      <button id="shuffle">Перемешать список</button>
-      <button id="add">Добавить</button>
-      <button id="remove">Удалить первого</button>
+      <button id="shuffle">Shuffle list</button>
+      <button id="add">Add</button>
+      <button id="remove">Remove first</button>
     </div>
 
     <script type="module">
@@ -40,32 +40,32 @@
 
       const app = document.getElementById('app')
 
-      // Состояние — список людей. Каждый со стабильным ключом id.
+      // State — a list of people. Each with a stable id key.
       let nextId = 4
       const people = ref([
-        { id: 1, name: 'Аня' },
-        { id: 2, name: 'Борис' },
-        { id: 3, name: 'Вика' },
+        { id: 1, name: 'Anya' },
+        { id: 2, name: 'Boris' },
+        { id: 3, name: 'Vika' },
       ])
 
-      // Описываем интерфейс как функцию от состояния.
+      // Describe the UI as a function of state.
       function view() {
         return h('div', [
-          h('h3', `Людей: ${people.value.length}`),
+          h('h3', `People: ${people.value.length}`),
           h(
             'ul',
-            // key берётся из props.key — по нему рендерер сопоставляет узлы.
+            // key comes from props.key — the renderer uses it to match nodes.
             people.value.map((p) => h('li', { key: p.id }, `#${p.id} — ${p.name}`)),
           ),
         ])
       }
 
-      // Реактивный рендер: effect перезапустит render при любом изменении people.
+      // Reactive render: effect re-runs render on any change to people.
       effect(() => {
         render(view(), app)
       })
 
-      // Кнопки просто меняют данные — DOM обновляется сам, точечно.
+      // Buttons simply change the data — the DOM updates itself, surgically.
       document.getElementById('shuffle').onclick = () => {
         const arr = [...people.value]
         for (let i = arr.length - 1; i > 0; i--) {
@@ -75,7 +75,7 @@
         people.value = arr
       }
       document.getElementById('add').onclick = () => {
-        people.value = [...people.value, { id: nextId, name: 'Гость ' + nextId }]
+        people.value = [...people.value, { id: nextId, name: 'Guest ' + nextId }]
         nextId++
       }
       document.getElementById('remove').onclick = () => {
