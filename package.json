@@ -1,14 +1,15 @@
 {
   "name": "minivue-from-scratch",
   "version": "0.1.0",
-  "description": "Учебная реализация Vue 3 с нуля: реактивность, virtual DOM, компилятор, компоненты, роутер, стор и SSR — на чистом ESM без сборки.",
+  "description": "Build Vue 3 from scratch: reactivity, virtual DOM, compiler, components, router, store and SSR — pure ESM, no build step.",
   "type": "module",
   "private": true,
   "scripts": {
     "test": "node --test test/*.test.mjs",
     "serve": "node scripts/serve.js",
-    "e2e": "node examples/kanban/e2e.mjs"
+    "e2e": "node examples/kanban/e2e.mjs",
+    "e2e:shop": "node examples/shop/e2e.mjs"
   },
-  "author": "Серик Мурадов <sirserik@gmail.com>",
+  "author": "Serik Muradov <sirserik@gmail.com>",
   "license": "MIT"
 }

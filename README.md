@@ -70,7 +70,12 @@ the layer under it doesn't have:
 | 11 | **Built-ins** | | `Teleport`, `KeepAlive`, `defineAsyncComponent` |
 | 12 | **Store, deeper** | | `$patch`, `$subscribe`, `$reset` + a capstone app |
 
-All 12 layers are **complete**: **104 passing tests**, browser demos, an SSR server, and a real-world capstone — a **Kanban board** (`examples/kanban`) with unit tests and a Playwright end-to-end suite.
+All 12 layers are **complete**: **104 passing tests**, browser demos, an SSR server, and two real-world example apps — a **Kanban board** (`examples/kanban`) and a **storefront on a fake REST API** (`examples/shop`), each with a Playwright end-to-end suite.
+
+<div align="center">
+<img src="docs/screenshots/shop.png" alt="MiniShop — a storefront built on MiniVue, fed by a fake REST API" width="820"><br>
+<sub>MiniShop — async data from a fake API (<a href="https://dummyjson.com">DummyJSON</a>), a persisted cart with a Teleport drawer, route-param product pages, and live filtering — all on MiniVue.</sub>
+</div>
 
 ## Quick start
 
@@ -89,8 +94,9 @@ npm run serve            # → http://localhost:5173/playground/
 # SSR example (layer 7): server render + hydration
 node playground/07-ssr/server.js   # → http://localhost:5174/
 
-# End-to-end test of the Kanban capstone (headless Chrome)
-npm run e2e
+# End-to-end tests of the example apps (headless Chrome)
+npm run e2e        # MiniTrello (Kanban)
+npm run e2e:shop   # MiniShop (mocked fake API)
 ```
 
 <div align="center">
@@ -110,7 +116,7 @@ Follow the layers in order — each builds on the last. For every layer:
 ```
 packages/     framework source — one package per subsystem, mirrors real Vue
 playground/   HTML demos that import packages/ directly (ESM, no build)
-examples/     the Kanban capstone app (unit + e2e tests)
+examples/     two demo apps — kanban/ and shop/ (each with an e2e suite)
 test/         104 tests on node:test
 book/         the companion book (Markdown → PDF via pandoc + xelatex)
 scripts/      dev server for the playground

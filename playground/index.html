@@ -28,11 +28,15 @@
       <li><a href="./11-builtins.html">Layer 11 — Built-in components</a> (Teleport, KeepAlive, async)</li>
       <li><a href="./12-capstone.html">Capstone — the “Notes” app</a> (router + store + forms + Teleport)</li>
     </ul>
-    <h2 style="font-size:18px">A full application</h2>
+    <h2 style="font-size:18px">Full applications</h2>
     <ul>
       <li><a href="../examples/kanban/index.html"><b>MiniTrello</b></a> — a Kanban board: router, store with
         persistence, forms (v-model), Teleport modals, KeepAlive tabs, an async component,
         and custom directives. End-to-end tests — <code>test/app-kanban.test.mjs</code>.</li>
+      <li><a href="../examples/shop/index.html"><b>MiniShop</b></a> — a storefront on a fake REST API
+        (<a href="https://dummyjson.com">DummyJSON</a>): async data with loading/error states, route
+        params + async fetch on <code>/product/:id</code>, a persisted cart with computed totals,
+        a Teleport cart drawer, and custom directives. E2E — <code>examples/shop/e2e.mjs</code>.</li>
     </ul>
   </body>
 </html>

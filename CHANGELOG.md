@@ -6,6 +6,10 @@ All notable changes to this project are documented here. The format is based on
 ## [Unreleased]
 
 ### Added
+- Second example app: **MiniShop** (`examples/shop/`), a storefront on a fake
+  REST API (DummyJSON) — async data, route-param product pages, a persisted
+  cart with a Teleport drawer, live filtering, and a mocked Playwright e2e
+  (`npm run e2e:shop`).
 - English edition of the companion book (`book/en/`), alongside the Russian
   original (`book/ru/`).
 - `pre-commit` hook that keeps both book editions in sync with `packages/`
