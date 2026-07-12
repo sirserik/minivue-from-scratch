@@ -9,7 +9,7 @@ rebuilt one readable layer at a time.<br>
 **Pure ESM · zero build step · zero runtime dependencies**
 
 [![CI](https://github.com/sirserik/minivue-from-scratch/actions/workflows/ci.yml/badge.svg)](https://github.com/sirserik/minivue-from-scratch/actions/workflows/ci.yml)
-[![tests](https://img.shields.io/badge/tests-104%20passing-brightgreen)](test/)
+[![tests](https://img.shields.io/badge/tests-105%20passing-brightgreen)](test/)
 [![runtime deps](https://img.shields.io/badge/runtime%20deps-0-blue)](package.json)
 [![license](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 [![book](https://img.shields.io/badge/book-EN%20%7C%20RU-orange)](book/)
@@ -46,7 +46,7 @@ Everything stands on the reactivity core; each layer above adds one capability
 the layer under it doesn't have:
 
 ```
-  apps        examples/kanban  ·  playground/*
+  apps        examples/kanban  ·  examples/shop  ·  playground/*
                    ▲
   ecosystem   router  ·  store  ·  built-ins  ·  server-renderer
                    ▲
@@ -70,7 +70,7 @@ the layer under it doesn't have:
 | 11 | **Built-ins** | | `Teleport`, `KeepAlive`, `defineAsyncComponent` |
 | 12 | **Store, deeper** | | `$patch`, `$subscribe`, `$reset` + a capstone app |
 
-All 12 layers are **complete**: **104 passing tests**, browser demos, an SSR server, and two real-world example apps — a **Kanban board** (`examples/kanban`) and a **storefront on a fake REST API** (`examples/shop`), each with a Playwright end-to-end suite.
+All 12 layers are **complete**: **105 passing tests**, browser demos, an SSR server, and two real-world example apps — a **Kanban board** (`examples/kanban`) and a **storefront on a fake REST API** (`examples/shop`), each with a Playwright end-to-end suite.
 
 <div align="center">
 <img src="docs/screenshots/shop.png" alt="MiniShop — a storefront built on MiniVue, fed by a fake REST API" width="820"><br>
@@ -117,7 +117,7 @@ Follow the layers in order — each builds on the last. For every layer:
 packages/     framework source — one package per subsystem, mirrors real Vue
 playground/   HTML demos that import packages/ directly (ESM, no build)
 examples/     two demo apps — kanban/ and shop/ (each with an e2e suite)
-test/         104 tests on node:test
+test/         105 tests on node:test
 book/         the companion book (Markdown → PDF via pandoc + xelatex)
 scripts/      dev server for the playground
 ```

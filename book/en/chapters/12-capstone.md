@@ -58,6 +58,27 @@ Not a single third-party line: reactivity, rendering, template compilation, the 
 and the store — all ours, assembled over twelve layers. If this app works, the whole
 framework works.
 
+## Two more apps — and a bug the shop caught
+
+The `examples/` folder holds two larger apps built entirely on this framework:
+
+- **MiniTrello** (`examples/kanban/`) — a Kanban board: router, a persisted store,
+  `v-model` forms, a Teleport modal, KeepAlive tabs, an async panel and custom
+  directives. Running it end-to-end in a real browser is what first caught several
+  renderer bugs.
+- **MiniShop** (`examples/shop/`) — a storefront fed by a fake REST API: async loading
+  with error states, a `/product/:id` page that refetches through `watchEffect`, a
+  persisted cart in a Teleport drawer, plus live search, category filtering and sorting.
+
+MiniShop earned its keep immediately. Its product grid is a **keyed list of components**
+(`<ProductCard :key="id">`), and sorting it re-orders those components. That reordering
+threw `insertBefore ... is not of type Node` — the exact gotcha from chapter 3. A
+component's re-render is queued, so `updateComponent` has to carry its DOM node over
+synchronously (`n2.el = n1.el`) for the keyed diff to move it. Our earlier apps only
+re-ordered keyed *elements*, whose `el` is assigned during `patch`, so the bug stayed
+hidden until a real product grid needed sorting. One more reminder that the surest way to
+find the gaps in a framework is to build something real on it.
+
 ## What we covered
 
 Twelve layers, each built on the ones before it:
@@ -98,7 +119,7 @@ Thanks for going the whole way. You didn't learn Vue — you wrote it.
 ## Check yourself
 
 ```bash
-npm test        # all 96 tests across twelve layers
+npm test        # all 105 tests across twelve layers
 npm run serve   # http://localhost:5173/playground/12-capstone.html
 ```
 

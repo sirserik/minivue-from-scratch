@@ -244,7 +244,7 @@ vnode ещё нет `el`. Обычные элементы сюда не попа
 ## Проверяем себя
 
 ```bash
-npm test        # среди прочего — 9 тестов компонентов
+npm test        # среди прочего — 10 тестов компонентов
 npm run serve   # http://localhost:5173/playground/03-components.html
 ```
 

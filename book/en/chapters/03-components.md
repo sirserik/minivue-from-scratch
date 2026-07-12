@@ -244,7 +244,7 @@ why the bug only surfaces once you build a keyed list of *components*.
 ## Check yourself
 
 ```bash
-npm test        # among others — 9 component tests
+npm test        # among others — 10 component tests
 npm run serve   # http://localhost:5173/playground/03-components.html
 ```
 
