@@ -59,17 +59,30 @@ export const CatalogPage = {
   setup() {
     const catalog = useCatalog()
     catalog.load() // fire-and-forget; the template reacts to loading/error/filtered
-    const resetFilters = () => {
-      catalog.search = ''
-      catalog.activeCategory = ''
-    }
-    return { catalog, resetFilters }
+    return { catalog }
   },
   template: `
     <div>
       <div class="toolbar card">
         <input class="search" v-model="catalog.search" v-focus placeholder="🔎 Search products…" />
         <button v-if="catalog.search" @click="catalog.search = ''">✕</button>
+        <span class="sep"></span>
+        <label class="ctl">
+          Sort
+          <select v-model="catalog.sort">
+            <option value="featured">Featured</option>
+            <option value="price-asc">Price: low to high</option>
+            <option value="price-desc">Price: high to low</option>
+            <option value="rating">Top rated</option>
+            <option value="name">Name A–Z</option>
+          </select>
+        </label>
+        <label class="ctl">
+          Price
+          <input type="number" class="pin" min="0" v-model="catalog.minPrice" placeholder="min" />
+          <span class="dash">–</span>
+          <input type="number" class="pin" min="0" v-model="catalog.maxPrice" placeholder="max" />
+        </label>
       </div>
 
       <div class="chips">
@@ -82,9 +95,10 @@ export const CatalogPage = {
       <p v-if="catalog.error" class="error state">⚠ {{ catalog.error }}</p>
 
       <div v-if="!catalog.loading && !catalog.error">
+        <p class="muted result-count" v-if="catalog.filtered.length > 0">{{ catalog.filtered.length }} products</p>
         <p v-if="catalog.filtered.length === 0" class="muted state">
           Nothing matches your filters.
-          <button @click="resetFilters()">Reset</button>
+          <button @click="catalog.resetFilters()">Reset</button>
         </p>
         <div class="grid">
           <ProductCard v-for="p in catalog.filtered" :key="p.id" :product="p" />

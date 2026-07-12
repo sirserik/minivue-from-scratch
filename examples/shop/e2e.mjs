@@ -59,6 +59,21 @@ try {
   assert((await page.locator('.pcard').count()) === 4, 'four product cards')
   assert((await page.getByText('Wireless Headphones').count()) > 0, 'a product title is shown')
 
+  console.log('1b. Sort + price filter (sorting moves keyed components)')
+  await page.selectOption('.toolbar select', 'price-asc')
+  await page.waitForTimeout(50)
+  assert((await page.locator('.pcard-title').first().textContent()) === 'USB-C Cable', 'price-asc puts the cheapest first')
+  await page.selectOption('.toolbar select', 'price-desc')
+  await page.waitForTimeout(50)
+  assert((await page.locator('.pcard-title').first().textContent()) === '4K Monitor', 'price-desc puts the priciest first')
+  await page.selectOption('.toolbar select', 'featured')
+  await page.fill('.toolbar .pin >> nth=0', '100') // min price
+  await page.waitForTimeout(50)
+  assert((await page.locator('.pcard').count()) === 1, 'price ≥ 100 leaves one product')
+  await page.fill('.toolbar .pin >> nth=0', '')
+  await page.waitForTimeout(50)
+  assert((await page.locator('.pcard').count()) === 4, 'clearing the price restores all')
+
   console.log('2. Category chip filters the grid (computed)')
   await page.locator('.chip', { hasText: 'peripherals' }).click()
   await page.waitForTimeout(50)

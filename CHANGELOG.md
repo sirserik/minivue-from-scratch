@@ -8,8 +8,14 @@ All notable changes to this project are documented here. The format is based on
 ### Added
 - Second example app: **MiniShop** (`examples/shop/`), a storefront on a fake
   REST API (DummyJSON) — async data, route-param product pages, a persisted
-  cart with a Teleport drawer, live filtering, and a mocked Playwright e2e
-  (`npm run e2e:shop`).
+  cart with a Teleport drawer, category/price filtering, sorting (price, rating,
+  name), and a mocked Playwright e2e (`npm run e2e:shop`).
+
+### Fixed
+- Moving a **keyed component** in a re-ordered list threw
+  `insertBefore ... is not of type Node`: `updateComponent` now carries the DOM
+  node (`n2.el = n1.el`) over synchronously, so a keyed list of components (e.g.
+  a sorted product grid) reorders correctly. Regression test added.
 - English edition of the companion book (`book/en/`), alongside the Russian
   original (`book/ru/`).
 - `pre-commit` hook that keeps both book editions in sync with `packages/`

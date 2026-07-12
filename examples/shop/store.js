@@ -18,9 +18,12 @@ export const useCatalog = defineStore('catalog', () => {
   const error = ref(null)
   const loaded = ref(false)
 
-  // Filter state — bound to the search box and the category chips.
+  // Filter state — bound to the search box, category chips, price inputs.
   const search = ref('')
   const activeCategory = ref('') // '' means "all"
+  const minPrice = ref('')
+  const maxPrice = ref('')
+  const sort = ref('featured') // featured | price-asc | price-desc | rating | name
 
   // Load products and categories once. Errors are captured into `error` so the
   // UI can show a message instead of throwing.
@@ -40,21 +43,47 @@ export const useCatalog = defineStore('catalog', () => {
     }
   }
 
-  // The visible products: filtered by category and by the search query.
+  // The visible products: filtered by category, search and price range, then
+  // sorted. Never mutates `products` — sorting works on a copy.
   const filtered = computed(() => {
     const q = search.value.trim().toLowerCase()
-    return products.value.filter((p) => {
+    const min = minPrice.value === '' ? -Infinity : Number(minPrice.value)
+    const max = maxPrice.value === '' ? Infinity : Number(maxPrice.value)
+
+    const list = products.value.filter((p) => {
       const okCat = !activeCategory.value || p.category === activeCategory.value
       const okSearch = !q || p.title.toLowerCase().includes(q)
-      return okCat && okSearch
+      const okPrice = p.price >= min && p.price <= max
+      return okCat && okSearch && okPrice
     })
+
+    const sorters = {
+      'price-asc': (a, b) => a.price - b.price,
+      'price-desc': (a, b) => b.price - a.price,
+      rating: (a, b) => b.rating - a.rating,
+      name: (a, b) => a.title.localeCompare(b.title),
+    }
+    const cmp = sorters[sort.value]
+    return cmp ? [...list].sort(cmp) : list // 'featured' keeps the API order
   })
 
   const setCategory = (slug) => {
     activeCategory.value = activeCategory.value === slug ? '' : slug
   }
 
-  return { products, categories, loading, error, loaded, search, activeCategory, filtered, load, setCategory }
+  // Clear every filter (but keep the chosen sort order).
+  const resetFilters = () => {
+    search.value = ''
+    activeCategory.value = ''
+    minPrice.value = ''
+    maxPrice.value = ''
+  }
+
+  return {
+    products, categories, loading, error, loaded,
+    search, activeCategory, minPrice, maxPrice, sort,
+    filtered, load, setCategory, resetFilters,
+  }
 })
 
 // ---------------------------------------------------------------------------
