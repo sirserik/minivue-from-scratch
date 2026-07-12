@@ -1,70 +1,68 @@
 #!/usr/bin/env bash
-# Собирает PDF учебника MiniVue из book/chapters/*.md.
-# Использование: bash book/build/build-pdf.sh [output.pdf] [файл1.md ...]
+# Builds the MiniVue book PDF from book/<lang>/chapters/*.md.
+#
+# Usage:
+#   bash book/build/build-pdf.sh [ru|en|all]
+#
+#   ru    — build the Russian book   → book/MiniVue-from-scratch-ru.pdf
+#   en    — build the English book   → book/MiniVue-from-scratch-en.pdf
+#   all   — build both (default)
+#
+# Chapters and title metadata live per language under book/ru/ and book/en/.
+# The two books must stay in sync: every code change should be reflected in
+# BOTH. See scripts/check-book-sync.sh (enforced by the pre-commit hook).
 
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
-OUT="${1:-$ROOT/book/MiniVue-from-scratch.pdf}"
-shift || true
+LANGS_ARG="${1:-all}"
 
-if [ "$#" -gt 0 ]; then
-  FILES=("$@")
-else
-  # Порядок глав = порядок изучения слоёв.
-  FILES=(
-    "$ROOT/book/chapters/00-intro.md"
-    "$ROOT/book/chapters/00b-javascript-minimum.md"
-    "$ROOT/book/chapters/01-reactivity.md"
-    "$ROOT/book/chapters/02-vdom.md"
-    "$ROOT/book/chapters/03-components.md"
-    "$ROOT/book/chapters/04-compiler.md"
-    "$ROOT/book/chapters/05-router.md"
-    "$ROOT/book/chapters/06-store.md"
-    "$ROOT/book/chapters/07-ssr.md"
-    "$ROOT/book/chapters/08-forms.md"
-    "$ROOT/book/chapters/09-reactivity-extras.md"
-    "$ROOT/book/chapters/10-directives.md"
-    "$ROOT/book/chapters/11-builtins.md"
-    "$ROOT/book/chapters/12-capstone.md"
-  )
-fi
+case "$LANGS_ARG" in
+  ru)  LANGS=(ru) ;;
+  en)  LANGS=(en) ;;
+  all) LANGS=(ru en) ;;
+  *)   echo "usage: build-pdf.sh [ru|en|all]" >&2; exit 2 ;;
+esac
 
-EXISTING=()
-for f in "${FILES[@]}"; do
-  if [ -f "$f" ]; then
-    EXISTING+=("$f")
-  else
-    echo "skip: $f (нет файла)" >&2
-  fi
+build_one() {
+  local lang="$1"
+  local dir="$ROOT/book/$lang"
+  local meta="$dir/metadata.yaml"
+  local out="$ROOT/book/MiniVue-from-scratch-$lang.pdf"
+
+  # Chapters in reading order (sort keeps 00 < 00b < 01 < ... < 12).
+  local FILES=()
+  while IFS= read -r f; do FILES+=("$f"); done < <(ls "$dir"/chapters/*.md | sort)
+
+  echo "[$lang] building ${#FILES[@]} chapters → $out"
+
+  local TMP
+  TMP="$(mktemp -d)"
+  trap 'rm -rf "$TMP"' RETURN
+
+  pandoc \
+    -s \
+    "$meta" \
+    "${FILES[@]}" \
+    --pdf-engine=xelatex \
+    --top-level-division=chapter \
+    --highlight-style=tango \
+    --listings=false \
+    -o "$TMP/book.tex"
+
+  ( cd "$TMP"
+    for i in 1 2 3; do
+      echo "  [$lang] xelatex pass $i/3..."
+      xelatex -interaction=batchmode -halt-on-error book.tex >/dev/null 2>&1 || {
+        xelatex -interaction=nonstopmode book.tex 2>&1 | tail -30
+        exit 1
+      }
+    done )
+
+  mv "$TMP/book.pdf" "$out"
+  echo "  [$lang] done: $out ($(du -h "$out" | cut -f1))"
+}
+
+for lang in "${LANGS[@]}"; do
+  build_one "$lang"
 done
-
-echo "Сборка PDF: ${#EXISTING[@]} глав → $OUT"
-
-TMP="$(mktemp -d)"
-trap 'rm -rf "$TMP"' EXIT
-
-pandoc \
-  -s \
-  "$ROOT/book/build/metadata.yaml" \
-  "${EXISTING[@]}" \
-  --pdf-engine=xelatex \
-  --top-level-division=chapter \
-  --highlight-style=tango \
-  --listings=false \
-  -o "$TMP/book.tex"
-
-cd "$TMP"
-# Три прогона xelatex — чтобы оглавление, ссылки и номера страниц сошлись.
-for i in 1 2 3; do
-  echo "  xelatex pass $i/3..."
-  xelatex -interaction=batchmode -halt-on-error book.tex >/dev/null 2>&1 || {
-    xelatex -interaction=nonstopmode book.tex 2>&1 | tail -30
-    exit 1
-  }
-done
-
-mv "$TMP/book.pdf" "$OUT"
-cd "$ROOT"
-
-echo "Готово: $OUT ($(du -h "$OUT" | cut -f1))"

@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# MiniVue pre-commit hook.
+# Enforces that the two language editions of the book stay in sync with the
+# framework source. See scripts/check-book-sync.sh for the rules.
+#
+# Enabled per-clone via:  git config core.hooksPath .githooks
+# (run scripts/install-hooks.sh once after cloning).
+
+set -euo pipefail
+ROOT="$(git rev-parse --show-toplevel)"
+exec bash "$ROOT/scripts/check-book-sync.sh"
