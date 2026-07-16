@@ -39,7 +39,11 @@ A single VNode looks like this:
 
 `Text` and `Fragment` are special marker types (`Symbol`) with no tag. `Text` is
 just text. `Fragment` is a group of nodes without a shared wrapper (for when you
-need to return several elements without wrapping them in an extra `<div>`).
+need to return several elements without wrapping them in an extra `<div>`). In the
+renderer a fragment is bracketed by two invisible empty text nodes — a start anchor
+(stored in `vnode.el`) and an end anchor (`vnode.anchor`) — so the diff always has
+real nodes to point at: siblings insert before the start anchor, and the fragment's
+own children live strictly between the two.
 
 Writing these objects by hand is awkward, so there's a function `h` (from
 "hyperscript"):
@@ -64,15 +68,19 @@ text." The diff algorithm itself is independent of them.
 export function createRenderer(options) {
   const {
     createElement: hostCreateElement,
+    // ...
     insert: hostInsert,
     remove: hostRemove,
     patchProp: hostPatchProp,
     // ...
   } = options
   // ... all of the diff lives inside ...
-  return { render }
+  return { render, hydrate, createRenderer, patch, __installComponents }
 }
 ```
+
+Besides `render`, the returned object carries `hydrate` and a couple of service
+hooks — they belong to later layers (7 and 3); ignore them for now.
 
 Why this abstraction? Because the same renderer then works anywhere. For the
 browser, the operations come from `runtime-dom` (files `nodeOps.js` and
@@ -103,20 +111,26 @@ function mountElement(vnode, container, anchor) {
   const { type, props, children } = vnode
   const el = (vnode.el = hostCreateElement(type)) // create and remember the node
   for (const key in props) {
+    if (key === 'key') continue // key is diff metadata, not a DOM attribute
     hostPatchProp(el, key, null, props[key])       // set attributes
   }
-  if (typeof children === 'string') {
-    hostSetElementText(el, children)               // text content
+  hostInsert(el, container, anchor)                // insert into the parent FIRST
+  if (typeof children === 'string' || typeof children === 'number') {
+    hostSetElementText(el, String(children))       // text content
   } else if (Array.isArray(children)) {
     mountChildren(children, el, null)              // or children recursively
   }
-  hostInsert(el, container, anchor)                // insert into the parent
+  invokeDirectives(vnode, 'mounted')               // custom directives (layer 8)
 }
 ```
 
 Notice `vnode.el = ...`. We store the reference to the real node right on the
 VNode. On the next update, the new VNode inherits this `el` — that's how we reuse
 the existing element instead of creating a new one.
+
+The element goes into the parent *before* its children are mounted: by the time
+the `mounted` hooks of custom directives run (layer 8), the node is already
+attached to the document — `el.focus()` on a detached node would be a silent no-op.
 
 ## Updating in place
 
@@ -168,6 +182,17 @@ real node objects before the rearrangement and confirm that after
 `[a,b,c] → [c,b,a]` they're the same objects, just reordered. Not one is
 recreated — which means focus, selection, and any other live state would have
 survived.
+
+## A gotcha: unmount must walk the whole subtree
+
+Our first `unmount` took an element off the page with a single
+`hostRemove(vnode.el)` — and the DOM did disappear. But everything *inside* went
+down silently: components nested in that element (layer 3) never fired their
+unmount hooks and their effects kept running, while a Teleport's children (layer
+11) stayed in their remote container forever. The fixed `unmount` always recurses
+through the children — passing `doRemove: false`, since the descendants' DOM leaves
+together with the ancestor — so cleanup runs for the whole subtree, and only the
+redundant per-node removals are skipped.
 
 ## How this ties into reactivity
 

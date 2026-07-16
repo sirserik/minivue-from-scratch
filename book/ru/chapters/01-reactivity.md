@@ -44,7 +44,7 @@ count.value = 5   // и заголовок вкладки сам стал «Кл
 ## Эффект — это функция, которую можно перезапустить
 
 Функцию, которую надо перезапускать при изменениях, мы называем **эффектом**. Чтобы
-system'а могла ей управлять, оборачиваем её в объект. Так к функции получится
+система могла ей управлять, оборачиваем её в объект. Так к функции получится
 прицепить служебные данные.
 
 Ключевая переменная — `activeEffect`. Пока выполняется тело эффекта, в ней лежит
@@ -70,6 +70,8 @@ export class ReactiveEffect {
     this.scheduler = scheduler
     this.deps = []
     this.active = true
+    this.onStop = null       // необязательный хук, вызывается раз при остановке
+    recordEffectScope(this)  // регистрация в текущем scope (о нём ниже)
   }
 
   run() {
@@ -92,6 +94,12 @@ export class ReactiveEffect {
 этот `activeEffect` и записывает связь. Как функция закончила — снимаем себя со
 стека и возвращаем активным того, кто был до нас. Обёртка `try/finally`
 гарантирует, что активный эффект восстановится, даже если внутри случится ошибка.
+
+Две новые строки в конструкторе относятся к `EffectScope` — «корзине» из того же
+файла, которая собирает все эффекты, созданные, пока она активна
+(`recordEffectScope`), чтобы потом остановить всю группу одним `scope.stop()`. Слой
+компонентов воспользуется этим позже: компонент складывает свой render-эффект и
+вотчеры в scope и на размонтировании отключает их разом.
 
 Про `scheduler` (планировщик) и `cleanup` поговорим чуть ниже — сначала посмотрим,
 как хранятся связи.
@@ -118,7 +126,7 @@ targetMap: WeakMap {
 
 ```js
 export function track(target, key) {
-  if (!activeEffect) return          // никто не слушает — выходим
+  if (!activeEffect || !shouldTrack) return  // никто не слушает (или трекинг на паузе)
 
   let depsMap = targetMap.get(target)
   if (!depsMap) targetMap.set(target, (depsMap = new Map()))
@@ -130,7 +138,8 @@ export function track(target, key) {
 }
 
 export function trackEffects(dep) {
-  if (!activeEffect) return
+  if (!activeEffect || !shouldTrack) return
+  if (dep.has(activeEffect)) return  // уже связаны в этом запуске
   dep.add(activeEffect)              // dep знает про эффект
   activeEffect.deps.push(dep)        // эффект знает про dep
 }
@@ -138,26 +147,58 @@ export function trackEffects(dep) {
 
 Обратите внимание на двустороннюю связь в `trackEffects`. `dep` запоминает эффект —
 чтобы потом его разбудить. Но и эффект запоминает `dep` (в своём массиве `deps`) —
-это понадобится для очистки, о которой ниже.
+это понадобится для очистки, о которой ниже. Флаг `shouldTrack` — глобальная «пауза»
+(`pauseTracking`/`resetTracking` в том же файле): мутирующие методы массива вроде
+`push()` попутно читают массив, и без паузы эффект, который делает push, подписался
+бы на собственные чтения.
 
 Обратная операция — `trigger`:
 
 ```js
-export function trigger(target, key) {
+export function trigger(target, key, type = 'set', newValue) {
   const depsMap = targetMap.get(target)
   if (!depsMap) return               // объект никто не читал
-  const dep = depsMap.get(key)
-  if (!dep) return
-  triggerEffects(dep)
+
+  // Собираем все dep-наборы, которых касается изменение, и будим их разом.
+  const deps = []
+
+  if (type === 'clear') {
+    deps.push(...depsMap.values())   // collection.clear(): пропали все ключи
+  } else if (key === 'length' && Array.isArray(target)) {
+    // … arr.length уменьшился: будим читателей 'length' и удалённых индексов …
+  } else {
+    deps.push(depsMap.get(key))
+    // … 'add'/'delete' (и map.set) будят ещё и эффекты-перечисления:
+    //   depsMap.get(ITERATE_KEY) или 'length' массива …
+  }
+
+  // Сливаем в один Set, чтобы эффект с несколькими dep запустился один раз.
+  const effects = new Set()
+  for (const dep of deps) {
+    if (dep) dep.forEach((effect) => effects.add(effect))
+  }
+  triggerEffects(effects)
 }
 
 export function triggerEffects(dep) {
   const effects = [...dep]           // копия! (объясняется ниже)
+
+  // Проход 1: сначала computed-эффекты — их кэш надо сбросить до того,
+  // как его прочитают обычные эффекты.
   for (const effect of effects) {
-    if (effect === activeEffect) continue   // не будим сами себя
-    if (effect.scheduler) effect.scheduler()
-    else effect.run()
+    if (effect.computed) triggerEffect(effect)
   }
+  // Проход 2: обычные эффекты.
+  // … полный файл ещё пропускает эффекты, которые уже перезапустил проход 1 …
+  for (const effect of effects) {
+    if (!effect.computed) triggerEffect(effect)
+  }
+}
+
+function triggerEffect(effect) {
+  if (effect === activeEffect) return     // не будим сами себя
+  if (effect.scheduler) effect.scheduler()
+  else effect.run()
 }
 ```
 
@@ -168,39 +209,83 @@ export function triggerEffects(dep) {
    `Set`, по которому прямо сейчас идёт цикл, — верный способ получить бесконечный
    цикл или пропуск. Перебираем копию — оригинал пусть меняется спокойно.
 
-2. **`if (effect === activeEffect) continue`** — защита от самоперезапуска. Если
-   внутри эффекта написать `count.value++`, он одновременно и читает, и пишет
-   `count`. Без этой строчки он будил бы сам себя до бесконечности.
+2. **`if (effect === activeEffect) return`** в `triggerEffect` — защита от
+   самоперезапуска. Если внутри эффекта написать `count.value++`, он одновременно и
+   читает, и пишет `count`. Без этой строчки он будил бы сам себя до бесконечности.
+
+В этом коде спрятаны ещё два решения. Аргумент `type` отличает изменение значения от
+добавления или удаления ключа — второе будит и эффекты-перечисления (`for…in`,
+`length` массива, `size` у Map/Set), которые подписываются на специальный
+`ITERATE_KEY`: у перебора нет одного свойства, от которого можно зависеть. А
+`triggerEffects` делает два прохода: сначала computed-эффекты, потом обычные —
+эффект, читающий и значение, и построенный на нём computed, никогда не увидит
+устаревший кэш (классический «глитч»).
 
 ## reactive: перехват объекта через Proxy
 
 Теперь заставим обычный объект вызывать `track` и `trigger` автоматически. Инструмент
-— `Proxy`. В перехватчике `get` зовём `track`, в `set` — `trigger`.
+— `Proxy`. В перехватчике `get` зовём `track`, в `set` — `trigger`. Настоящий файл
+строит эти перехватчики фабрикой — одни и те же `createGetter`/`createSetter`
+обслуживают `reactive`, `shallowReactive` и `readonly` (глава 9), различаясь лишь
+двумя флагами:
 
 ```js
-// packages/reactivity/reactive.js
-export function reactive(target) {
-  if (!isObject(target)) return target
-  // ... защита от повторной обёртки ...
+// packages/reactivity/reactive.js  (перехватчики get и set, сокращённо)
+function createGetter(isReadonly = false, isShallow = false) {
+  return function get(obj, key, receiver) {
+    // … служебные метки, инструментованные методы массивов, системные символы …
 
-  return new Proxy(target, {
-    get(obj, key, receiver) {
-      const result = Reflect.get(obj, key, receiver)
-      track(obj, key)                      // «меня прочитали»
-      if (isObject(result)) return reactive(result)  // глубина по требованию
-      return result
-    },
-    set(obj, key, value, receiver) {
-      const oldValue = obj[key]
-      const result = Reflect.set(obj, key, value, receiver)
-      if (hasChanged(oldValue, value)) trigger(obj, key)  // «меня изменили»
-      return result
-    },
-  })
+    const result = Reflect.get(obj, key, receiver)
+
+    if (!isReadonly) track(obj, key)   // «меня прочитали»
+
+    if (isShallow) return result
+
+    // ref внутри реактивного объекта разворачивается сам: state.count,
+    // а не state.count.value (исключение — массивы).
+    if (isRef(result)) {
+      return Array.isArray(obj) && isIntegerKey(key) ? result : result.value
+    }
+
+    if (isObject(result)) {
+      return isReadonly ? readonly(result) : reactive(result) // глубина по требованию
+    }
+
+    return result
+  }
+}
+
+function createSetter(isShallow = false) {
+  return function set(obj, key, value, receiver) {
+    let oldValue = obj[key]
+    // … ref под этим ключом забирает запись в свой .value;
+    //   oldValue и value сравниваются «сырыми», через toRaw …
+
+    const hadKey =
+      Array.isArray(obj) && isIntegerKey(key)
+        ? Number(key) < obj.length
+        : Object.prototype.hasOwnProperty.call(obj, key)
+
+    const result = Reflect.set(obj, key, value, receiver)
+    // … защита от цепочки прототипов: trigger зовёт только тот объект,
+    //   в который реально писали …
+
+    if (!hadKey) {
+      trigger(obj, key, 'add')         // появился новый ключ
+    } else if (hasChanged(oldValue, value)) {
+      trigger(obj, key, 'set', value)  // существующий ключ получил новое значение
+    }
+
+    return result
+  }
+}
+
+export function reactive(target) {
+  return createReactiveObject(target, mutableHandlers, reactiveMap)
 }
 ```
 
-Три решения, которые стоит проговорить.
+Четыре решения, которые стоит проговорить.
 
 **Глубокая реактивность по требованию.** Если прочитанное свойство само оказалось
 объектом, мы оборачиваем его в `reactive` прямо в этот момент — не заранее, рекурсивно
@@ -214,6 +299,24 @@ export function reactive(target) {
 **`Reflect` вместо `obj[key]`.** На объектах с геттерами и наследованием прямой доступ
 теряет правильный `this`. `Reflect.get/set` с `receiver` его сохраняют. На простых
 объектах разницы нет, но привыкать стоит к правильному варианту.
+
+**ref разворачивается сам.** ref, лежащий внутри реактивного объекта, читается как
+`state.count`, а не `state.count.value` — геттер отдаёт его `.value`, а сеттер
+записывает присвоенное не-ref значение внутрь него. Исключение — массивы: в `arr[0]`
+ref может лежать законно (семантика Vue).
+
+Внизу файла — `createReactiveObject` со всей обвязкой: он кэширует прокси по объекту
+(`reactive(obj)` дважды вернёт один и тот же Proxy), возвращает без изменений
+примитивы, объекты с меткой `markRaw` и те, кого проксировать нельзя (Date, RegExp,
+экземпляры классов с внутренними слотами), а для Map/Set подставляет отдельный набор
+перехватчиков: их методы работают со скрытыми внутренними слотами, которых у Proxy
+нет, поэтому файл подменяет их «инструментованными» версиями, зовущими
+`track`/`trigger` вручную. Массивам достаётся похожее: `includes`/`indexOf`/
+`lastIndexOf` ищут ещё и по «сырому» массиву (элементы наружу выходят обёрнутыми, и
+поиск по идентичности промахнулся бы), а `push`/`pop`/`shift`/`unshift`/`splice` на
+время работы ставят трекинг на паузу, чтобы пишущий эффект не подписался на
+собственные попутные чтения. Перечисление — `for…in`, `Object.keys`, `size` и
+`forEach` коллекций — отслеживается через `ITERATE_KEY`, тот самый ключ из `trigger`.
 
 ## ref: реактивность для одного значения
 
@@ -265,7 +368,9 @@ class RefImpl {
 ```js
 // packages/reactivity/computed.js
 class ComputedRefImpl {
-  constructor(getter) {
+  constructor(getter, setter) {
+    this._value = undefined
+    this._setter = setter
     this._dirty = true             // надо ли пересчитать
     this.dep = new Set()
     this.__isRef = true
@@ -275,6 +380,7 @@ class ComputedRefImpl {
         triggerEffects(this.dep)   // и будим тех, кто читал computed
       }
     })
+    this.effect.computed = true    // «сбрасывать меня раньше обычных эффектов»
   }
   get value() {
     if (activeEffect) trackEffects(this.dep)
@@ -284,6 +390,7 @@ class ComputedRefImpl {
     }
     return this._value
   }
+  // … set value(v) передаёт запись сеттеру — computed с записью …
 }
 ```
 
@@ -293,6 +400,11 @@ class ComputedRefImpl {
 планировщик лишь поднимает флаг `_dirty` и будит читателей. Сам пересчёт случится в
 `get value`, и только если кто-то действительно спросил результат. Прочитали дважды
 без изменений — второй раз вернётся из кэша, `getter` не выполнится.
+
+Метка `this.effect.computed = true` — тот самый флаг, по которому `triggerEffects`
+сбрасывает computed раньше обычных эффектов. А сеттер делает возможным computed с
+записью: `computed({ get, set })` передаёт присваивание в ваш `set`, computed из
+одного геттера лишь предупреждает в консоль.
 
 ## Почему нужен cleanup: задача с ветвлением
 
@@ -331,7 +443,7 @@ function cleanup(effect) {
 
 `effect` просто перезапускает функцию. `watch` — надстройка, которая на изменение
 зовёт колбэк и передаёт в него новое и старое значения. Источником может быть `ref`,
-геттер-функция или целый `reactive`-объект.
+геттер-функция, целый `reactive`-объект или массив таких источников.
 
 Идея: любой источник приводим к функции-геттеру, оборачиваем в эффект, а всю «реакцию»
 кладём в планировщик — он вычислит новое значение и позовёт колбэк.
@@ -341,17 +453,25 @@ function cleanup(effect) {
 let oldValue
 const job = () => {
   const newValue = effect.run()
-  callback(newValue, oldValue)
+  // … выходим, если значение на самом деле не изменилось …
+  callback(newValue, oldValue, onCleanup)
   oldValue = newValue
 }
-const effect = new ReactiveEffect(getter, job)
+// 'sync' срабатывает прямо внутри мутации; по умолчанию ('pre') job попадает
+// в микротаск-очередь — три синхронные записи дают один вызов колбэка.
+const scheduler = flush === 'sync' ? job : () => queueWatchJob(job)
+const effect = new ReactiveEffect(getter, scheduler)
 oldValue = effect.run()          // первый прогон: собрать зависимости, запомнить старт
 ```
 
 Для `reactive`-объекта, чтобы следить «глубоко», используется обход `traverse` — он
 рекурсивно читает все вложенные свойства, тем самым подписывая эффект на каждый
-уровень. `immediate: true` заставляет колбэк сработать сразу, не дожидаясь первого
-изменения.
+уровень (`deep: true` делает то же для любого источника, а массив источников сводится
+к геттеру по всем сразу). `immediate: true` заставляет колбэк сработать сразу,
+`once: true` останавливает наблюдение после первого вызова. Третий аргумент колбэка,
+`onCleanup`, регистрирует функцию, которая выполнится перед следующим вызовом и при
+остановке, — стандартный способ отменить запрос, устаревший из-за более нового
+значения.
 
 ## Как всё это работает вместе
 
@@ -382,7 +502,7 @@ Vue — и мы её только что построили.
 npm test
 ```
 
-Тринадцать проверок в `test/reactivity.test.mjs` подтверждают каждое свойство: `ref`
+Четырнадцать проверок в `test/reactivity.test.mjs` подтверждают каждое свойство: `ref`
 и `reactive` реагируют, `computed` ленив и кэширует, `cleanup` отписывает от лишнего,
 `watch` отдаёт старое и новое. Потом откройте демо:
 

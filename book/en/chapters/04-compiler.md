@@ -36,12 +36,32 @@ descent»: for nested tags the function calls itself.
 function parseChildren(context) {
   const nodes = []
   while (!isEnd(context)) {
+    // Remember how much input is left: every loop iteration MUST consume at
+    // least one character, otherwise we would spin forever on the same spot.
+    const lengthBefore = context.source.length
+
     const s = context.source
-    if (s.startsWith('{{')) nodes.push(parseInterpolation(context))
-    else if (s[0] === '<' && /[a-zA-Z]/.test(s[1])) nodes.push(parseElement(context))
-    else nodes.push(parseText(context))
+    let node = null
+    if (s.startsWith('<!--')) {
+      parseComment(context) // comments produce no output — just skip them
+    } else if (s.startsWith('{{')) {
+      node = parseInterpolation(context)
+    } else if (s[0] === '<' && /[a-zA-Z]/.test(s[1])) {
+      node = parseElement(context)
+    } else {
+      // Everything else is text — including a lone '<' that does not start a
+      // tag (e.g. "5 < 10" or "i <3 vue").
+      node = parseText(context)
+    }
+    if (node) nodes.push(node)
+
+    // The progress guarantee. If a branch above ever consumes nothing, we fail
+    // loudly instead of hanging the whole program in an infinite loop.
+    if (context.source.length === lengthBefore) {
+      parseError(context, 'Parser made no progress — cannot understand this input')
+    }
   }
-  return nodes
+  return condenseWhitespace(nodes)
 }
 ```
 
@@ -50,11 +70,27 @@ function parseChildren(context) {
 the tag and attributes, then recursively calls `parseChildren` for the contents
 until it hits the closing `</tag>`. That's how a tree grows out of a flat string.
 
+Two chores hide at the edges of the loop. Comments `<!-- -->` are recognized and
+skipped — they produce no node at all. And `condenseWhitespace` cleans up at the
+end: a whitespace-only text node with a newline in it is code formatting and gets
+dropped, while a deliberate space between inline elements survives as a single
+`' '`. Text and attribute values also decode HTML entities (`&amp;` → `&`) — our
+templates never pass through the browser's parser, so nobody else would do it.
+
 Nodes come in three types: `Element` (a tag with attributes and children), `Text`
 (plain text), and `Interpolation` (an insertion `{{ expression }}`). The parser
 collects attributes as raw `{ name, value }` pairs without probing their meaning —
 figuring out that `v-if` is a condition and `@click` is a handler is the next step's
 job.
+
+## A gotcha: a parser must always move forward
+
+The progress check in `parseChildren` is a scar from a real bug. The original loop
+had no such guarantee, and a template with an innocent `<!-- -->` froze the page:
+there was no comment branch, `parseText` stops at every `<`, so an iteration
+consumed zero characters — and the `while` loop asked about the same spot forever.
+The fixed parser makes it a rule: every branch must consume at least one character,
+and an iteration that eats nothing is a loud compile error, not a silent hang.
 
 ## Generation: from tree to code
 
@@ -96,9 +132,15 @@ as is: `(inc)`. But `@click="count++"` is an action expression, and it must be
 wrapped, otherwise `count++` runs once at generation time rather than on click:
 
 ```js
-function genHandler(exp) {
+function genHandler(on) {
+  const exp = on.exp
+  // ...
   const isMethodPath = /^[A-Za-z_$][\w$.]*$/.test(exp.trim())
-  return isMethodPath ? `(${exp})` : `$event => (${exp})`
+
+  if (mods.length === 0) {
+    return isMethodPath ? `(${exp})` : `$event => (${exp})`
+  }
+  // ... event modifiers (@click.stop) — that story comes in the forms chapter
 }
 ```
 
@@ -108,8 +150,13 @@ all, not their attributes. `v-for="item in list"` wraps the node in the helper `
 
 ```js
 // <li v-for="item in items">{{ item }}</li>  turns into:
-_l(items, (item) => h("li", null, [_s(item)]))
+h(Fragment, null, [..._l(items, (item) => h("li", null, [_s(item)]))])
 ```
+
+An array is not a vnode, and `render` must return exactly one — so when `v-for`
+sits on the root element (perfectly legal, as here), the generator spreads the
+array into an invisible `Fragment`. Inside a parent element the `_l(...)` call is
+spread into that parent's children the same way.
 
 `v-if` is generated at the level of the children list, because it needs access to a
 neighboring `v-else`. The chain `v-if / v-else-if / v-else` is assembled into a
@@ -130,20 +177,32 @@ come from the component's state, from `ctx`. Dragging `ctx.` in front of every n
 the generator is a chore. Instead, we wrap the body in `with(ctx)`:
 
 ```js
-new Function('h', 'Fragment', '_s', '_l',
-  `return function render(ctx){ with(ctx){ return ${code} } }`)
+factory = new Function(
+  'h',
+  'Fragment',
+  '_s',
+  '_l',
+  // ... plus the helpers of later chapters: _c, _key, _cd, _wd, _dir, _m, _th
+  `return function render(ctx){ with(ctx){ return ${code} } }`,
+)
 ```
 
 `with(ctx)` forces every name inside to be looked up in `ctx` first. So `msg` resolves
 as `ctx.msg`, and `count` as `ctx.count`, without a single `ctx.` in the code. The
-helpers `h`, `_s`, `_l` come in as parameters of the outer factory function, bypassing
-`ctx`.
+helpers — `h`, `_s`, `_l` and, as the engine grows, seven more — come in as parameters
+of the outer factory function, bypassing `ctx`. One more real-world touch: the
+`new Function` call is wrapped in `try/catch` — a syntax error here means a broken
+expression *from the template* (say, `@click="count +"`), so the rethrown error
+quotes the generated code instead of pointing nowhere.
 
 `with` is a rare and usually undesirable JavaScript operator, but here it fits, and
 Vue's real runtime compiler uses the same trick (`with(this)`). For `with` to decide
 correctly which name comes from `ctx` and which comes from the outer scope, we added a
-`has` trap to the component context proxy (layer 3): it answers «yes» for state and
-props, and «no» for everything else.
+`has` trap to the component context proxy (layer 3). It answers «yes» for state and
+props, «no» for the compiler's helpers and a small whitelist of safe globals (`Math`,
+`Date`, `JSON`…), and claims every *other* unknown name for itself: the template then
+sees `undefined` and gets a one-time warning — instead of a typo falling through to
+`window` or exploding as a raw `ReferenceError` mid-render.
 
 ## How the compiler hooks into the runtime
 
@@ -153,13 +212,24 @@ importing `packages/compiler/index.js` calls `registerRuntimeCompiler(compile)`,
 from that point on a component with a `template` property is compiled automatically at
 initialization (`finishComponentSetup` in layer 3). The full build
 `packages/minivue.js` does this import for you — the way the main `vue` package
-bundles both the runtime and the compiler.
+bundles both the runtime and the compiler. Compiling isn't free, so
+`finishComponentSetup` caches the result per component definition in a `WeakMap`:
+a list of a thousand identical components compiles its template once, not a
+thousand times.
 
 ## What we simplified
 
 Vue's real compiler does far more: static analysis and hoisting of unchanging nodes,
-patch flags to speed up diffing, handler caching, `v-model`, slots, event modifiers
-(`@click.stop`), compilation in a separate build step. We took the core idea —
+patch flags to speed up diffing, handler caching, slots, compilation in a separate
+build step. (`v-model` and event modifiers like `@click.stop`, still missing here,
+will be added in the forms chapter.) One shortcut is architectural: `compile.js`
+imports `h` and `Fragment` straight from runtime-core — a layer inversion compared
+to real Vue, where the compiler emits code that only *names* its helpers and the
+runtime binds them when it registers the compiler. Binding the helpers on the spot
+keeps the whole template→function story in one readable file, at the price of a
+compiler that cannot live without runtime-core; Vue pays the opposite price — an
+extra indirection layer — to ship a runtime-only build without the compiler and a
+compiler that runs at build time without the runtime. We took the core idea —
 parsing, generation, `with(ctx)` — and the most needed directives. That's enough to
 understand how `<div>{{ x }}</div>` becomes a working interface, and to write real
 applications with templates.

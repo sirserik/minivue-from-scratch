@@ -9,6 +9,9 @@
 
 import { h } from './vnode.js'
 import { ref } from '../reactivity/index.js'
+// Circular import (component.js imports BUILTIN_COMPONENTS back from us) —
+// fine: getCurrentInstance is a hoisted function only called at runtime.
+import { getCurrentInstance } from './component.js'
 
 // ---------------------------------------------------------------------------
 //  Teleport — a "portal": renders its children not in place, but into a given
@@ -34,16 +37,23 @@ export const Teleport = {
 //
 //    <KeepAlive><component :is="tab" /></KeepAlive>
 //
-//  The activation/deactivation logic lives in the renderer (driven by markers on
-//  the vnode). Here we only keep a "key → vnode with a live instance" cache and
-//  set the markers.
+//  The activation/deactivation logic lives in the component system (driven by
+//  markers on the vnode). Here we only keep a "key → vnode with a live
+//  instance" cache and set the markers.
 // ---------------------------------------------------------------------------
 /** KeepAlive built-in: caches the wrapped dynamic component so its state survives toggling. */
 export const KeepAlive = {
   name: 'KeepAlive',
   __isKeepAlive: true,
   setup(props, { slots }) {
+    // The KeepAlive instance OWNS its cache. When the KeepAlive itself is
+    // unmounted, unmountComponent (component.js) walks this cache and truly
+    // destroys every stashed instance — hooks fire, effects stop. Without an
+    // owner, "unmount" would keep stashing forever and leak every cached
+    // component for the life of the page.
+    const instance = getCurrentInstance()
     const cache = new Map() // component key → its cached vnode
+    instance.__keepAliveCache = cache
 
     return () => {
       const children = slots.default ? slots.default() : []
@@ -55,12 +65,15 @@ export const KeepAlive = {
       if (cache.has(key)) {
         // Seen before: reuse the live instance from the cache.
         vnode.component = cache.get(key).component
-        vnode.__keptAlive = true // the renderer "reactivates" instead of remounting
-      } else {
-        cache.set(key, vnode)
+        vnode.__keptAlive = true // the component system "reactivates" instead of remounting
       }
-      // On leave, the renderer stashes this vnode away instead of destroying it.
+      // Always store the FRESH vnode: it carries the latest props, and the
+      // teardown pass must see current state, not a first-render snapshot.
+      cache.set(key, vnode)
+      // On leave, this vnode is stashed away instead of destroyed — unless the
+      // owner (this KeepAlive) is itself being torn down.
       vnode.__shouldKeepAlive = true
+      vnode.__keepAliveOwner = instance
       return vnode
     }
   },
@@ -83,22 +96,45 @@ export const KeepAlive = {
 export function defineAsyncComponent(source) {
   const options = typeof source === 'function' ? { loader: source } : source
   let resolvedComponent = null
+  // ONE in-flight request shared by every instance of this wrapper: ten async
+  // components in a list must trigger one fetch, not ten. A failed load clears
+  // the slot so a later instance can retry.
+  let pendingRequest = null
 
-  return {
-    name: 'AsyncComponentWrapper',
-    setup() {
-      const loaded = ref(false)
-      const error = ref(null)
-
-      options
+  function load() {
+    if (resolvedComponent) return Promise.resolve(resolvedComponent)
+    if (!pendingRequest) {
+      pendingRequest = options
         .loader()
         .then((mod) => {
           // Support both `export default` and returning the component directly.
           resolvedComponent = mod && mod.default ? mod.default : mod
-          loaded.value = true
+          return resolvedComponent
         })
         .catch((err) => {
-          error.value = err
+          pendingRequest = null // allow retrying after a failure
+          throw err
+        })
+    }
+    return pendingRequest
+  }
+
+  return {
+    name: 'AsyncComponentWrapper',
+    setup() {
+      const instance = getCurrentInstance()
+      const loaded = ref(false)
+      const error = ref(null)
+
+      load()
+        .then(() => {
+          // The user may navigate away before the chunk arrives. A dead wrapper
+          // must not flip state and mount the late component into a container
+          // that was already cleared.
+          if (!instance || !instance.isUnmounted) loaded.value = true
+        })
+        .catch((err) => {
+          if (!instance || !instance.isUnmounted) error.value = err
         })
 
       return () => {

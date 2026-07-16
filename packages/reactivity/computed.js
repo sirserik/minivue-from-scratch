@@ -15,8 +15,9 @@
 import { ReactiveEffect, trackEffects, triggerEffects, activeEffect } from './effect.js'
 
 class ComputedRefImpl {
-  constructor(getter) {
+  constructor(getter, setter) {
     this._value = undefined
+    this._setter = setter
     // "Dirty" flag: true means dependencies changed and we need to recompute.
     // Starts true so the first access computes the value.
     this._dirty = true
@@ -35,6 +36,9 @@ class ComputedRefImpl {
         triggerEffects(this.dep)
       }
     })
+    // The flag triggerEffects uses to invalidate computeds BEFORE running plain
+    // effects — otherwise an effect could read a stale cached value (a "glitch").
+    this.effect.computed = true
   }
 
   get value() {
@@ -50,13 +54,30 @@ class ComputedRefImpl {
 
     return this._value
   }
+
+  set value(newValue) {
+    // A writable computed forwards the write to its setter (which usually
+    // writes into the underlying source). A getter-only computed warns.
+    this._setter(newValue)
+  }
 }
 
 /**
- * Creates a lazily-evaluated, cached, reactive value from a getter.
- * @param {() => *} getter - Function computing the value from reactive sources.
+ * Creates a lazily-evaluated, cached, reactive value from a getter, or a
+ * writable computed from a { get, set } pair.
+ * @param {(() => *)|{get: () => *, set: (value: *) => void}} getterOrOptions -
+ *   A getter function, or an object with get and set.
  * @returns {ComputedRefImpl} A ref-like object whose `.value` returns the result.
  */
-export function computed(getter) {
-  return new ComputedRefImpl(getter)
+export function computed(getterOrOptions) {
+  let getter
+  let setter
+  if (typeof getterOrOptions === 'function') {
+    getter = getterOrOptions
+    setter = () => console.warn('computed: value is readonly (no setter was provided)')
+  } else {
+    getter = getterOrOptions.get
+    setter = getterOrOptions.set
+  }
+  return new ComputedRefImpl(getter, setter)
 }

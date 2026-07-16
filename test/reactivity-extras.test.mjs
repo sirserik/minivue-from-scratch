@@ -14,15 +14,17 @@ import {
   markRaw,
 } from '../packages/reactivity/index.js'
 
-test('watchEffect: runs immediately and re-runs', () => {
+test('watchEffect: runs immediately and re-runs', async () => {
   const state = reactive({ n: 1 })
   const seen = []
   const stop = watchEffect(() => seen.push(state.n))
   assert.deepEqual(seen, [1]) // ran right away
   state.n = 2
+  await Promise.resolve() // re-runs are batched in a microtask (flush: 'pre')
   assert.deepEqual(seen, [1, 2])
   stop()
   state.n = 3
+  await Promise.resolve()
   assert.deepEqual(seen, [1, 2], 'no reaction after stop')
 })
 

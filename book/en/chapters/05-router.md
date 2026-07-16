@@ -26,8 +26,9 @@ ours.
 
 The URL can be stored in different ways, depending on the environment. So the
 mechanism is hidden behind a `history` object with a single interface: `location`
-(the current path), `push` and `replace` (change it), `listen` (subscribe to
-changes). There are three implementations:
+(the current path), `push` and `replace` (change it), `go` (walk the history
+stack), `listen` (subscribe to changes), `destroy` (remove the listeners). There
+are three implementations:
 
 - **`createWebHistory`** — normal URLs like `/about` via the History API
   (`pushState`). Clean, but the server must serve `index.html` for any path.
@@ -48,58 +49,109 @@ into capture groups:
 ```js
 function compileRoute(record) {
   const keys = []
-  const pattern = record.path
-    .replace(/\//g, '\\/')
-    .replace(/:(\w+)/g, (_, name) => {
-      keys.push(name)      // remember the parameter name
-      return '([^/]+)'      // and replace :id with "any segment without a slash"
+  let score = 0 // each static segment adds a point — the most specific route wins
+  const segments = record.path.split('/').filter(Boolean)
+  const pattern = segments
+    .map((segment) => {
+      if (segment[0] === ':') {
+        keys.push(segment.slice(1)) // remember the parameter name
+        return '/([^/]+)'           // and match "any segment without a slash"
+      }
+      score++
+      return '/' + escapeRegExp(segment) // static segment, regex chars escaped
     })
-  return { ...record, regex: new RegExp('^' + pattern + '$'), keys }
+    .join('')
+  const regex = new RegExp('^' + (pattern || '/') + '/?$') // '/?$' tolerates a trailing slash
+  return { ...record, regex, keys, score }
 }
 ```
 
-`resolve(path)` iterates over the routes, applies their regexes, and for the first
-match collects `params` from the capture groups using the saved names. If nothing
-matches, an empty route is returned, and `<RouterView>` shows nothing.
+`resolve(to)` first splits the hash and the query string off the URL (`?q=vue`
+becomes the object `{ q: 'vue' }` via `parseQuery`), then runs the path against
+every record and keeps the *most specific* match — the `score` is what stops
+`/user/:id` from shadowing `/user/new` just because it was declared first. For the
+winner, `params` are collected from the capture groups using the saved names. If
+nothing matches, an empty route is returned, and `<RouterView>` shows nothing.
 
 ## The reactive current route
 
 The heart of the router is the reactive object `currentRoute`:
 
 ```js
-const currentRoute = reactive({ path: '/', params: {}, matched: [] })
+const currentRoute = reactive({
+  path: '/',
+  fullPath: '/',
+  query: {},
+  hash: '',
+  params: {},
+  matched: [], // list of matching records
+})
 
-function applyRoute(path) {
-  const r = resolve(path)
-  currentRoute.path = r.path
-  currentRoute.params = r.params
-  currentRoute.matched = r.matched  // the record(s) of the matching route
+function applyRoute(route) {
+  currentRoute.path = route.path
+  currentRoute.fullPath = route.fullPath
+  currentRoute.query = route.query
+  currentRoute.hash = route.hash
+  currentRoute.params = route.params
+  currentRoute.matched = route.matched
 }
 ```
 
-`applyRoute` writes the parse result into the reactive object — and that's the only
-thing needed to update the UI. Everything that read `currentRoute` reacts. The
-router subscribes to the history (`history.listen(applyRoute)`), so both our `push`
-and the browser's back/forward buttons lead to the same thing — a re-render.
+`applyRoute` writes the resolved route into the reactive object — and that's the
+only thing needed to update the UI. Everything that read `currentRoute` reacts. The
+router also subscribes to the history: an external URL change (the browser's
+back/forward buttons) arrives as `navigate(path, 'pop')` — the same pipeline as our
+own `push`, guards included — and ends in the same re-render.
 
 ## Navigation and guards
 
 `push` doesn't change the URL right away — first it runs the navigation hooks
 (`beforeEach`). A hook receives where we're going and where we're coming from, and
-it can allow the transition, cancel it (by returning `false`), or redirect (by
-returning a different path):
+it can allow the transition, cancel it (by returning `false`), redirect (by
+returning a different path) — or return a Promise of any of these: async guards
+are awaited, and if a newer navigation starts during the wait, the stale one is
+abandoned:
 
 ```js
-function navigate(to, replace) {
-  const toRoute = resolve(typeof to === 'string' ? to : to.path)
+async function navigate(to, mode, redirectDepth = 0, id = ++navigationId) {
+  const toRoute = resolve(to)
+  // …
   for (const guard of guards) {
-    const result = guard(toRoute, currentRoute)
-    if (result === false) return                    // cancel
-    if (typeof result === 'string') return navigate(result, replace) // redirect
+    let result = guard(toRoute, currentRoute)
+    if (result && typeof result.then === 'function') {
+      result = await result // an async guard
+      if (id !== navigationId) return false // a newer navigation won — abandon this one
+    }
+    if (result === false) {
+      // On Back/Forward the browser has already moved the URL — restore it.
+      if (mode === 'pop') history.replace(currentRoute.fullPath)
+      // …
+      return false
+    }
+    if (typeof result === 'string') {
+      // Redirect — with a cap, so guards redirecting to each other can't loop forever.
+      if (redirectDepth >= MAX_REDIRECTS) {
+        // …
+        return false
+      }
+      // …
+      const nextMode = mode === 'push' ? 'push' : 'replace'
+      return navigate(result, nextMode, redirectDepth + 1, id)
+    }
   }
-  history[replace ? 'replace' : 'push'](toRoute.path) // and only now change the URL
+  applyRoute(toRoute) // the route first — and only now the URL
+  if (mode === 'push' || mode === 'replace') history[mode](toRoute.fullPath)
+  return true
 }
 ```
+
+`mode` says who started the navigation: `push`/`replace` come from code and write
+the URL on success; `pop` means the URL has already changed (browser back/forward)
+and only needs validating — with a rollback on cancel; `init` validates the initial
+URL when the app installs, so an auth guard fires even on a bookmarked private
+page. `push` returns a Promise resolving to `true` (navigated) or `false`
+(cancelled, superseded, or too many redirects — the chain is capped at
+`MAX_REDIRECTS = 10`, as in vue-router).
 
 This is how you protect pages: "don't let an unauthenticated user into `/admin`,
 send them to `/login`". The tests cover both branches — cancellation and redirect.
@@ -127,7 +179,10 @@ the route, and on navigation `<RouterView>` re-renders itself.
 
 `<RouterLink>` renders an ordinary `<a>`, but it intercepts the click: it cancels
 the browser's default navigation (`preventDefault`) and calls `router.push` — so
-the URL changes without a reload.
+the URL changes without a reload. It also compares its target with the current
+route and puts vue-router's classes on the `<a>`: `router-link-exact-active` when
+the paths match exactly, `router-link-active` when the current path lives "under"
+the link (`/user` is active while you're on `/user/42`).
 
 ## Wiring into the app
 
@@ -141,9 +196,12 @@ install(app) {
   app.provide(ROUTER_KEY, router)
   app.provide(ROUTE_KEY, currentRoute)
   app.component('RouterView', RouterView)
+  app.component('router-view', RouterView)
   app.component('RouterLink', RouterLink)
+  app.component('router-link', RouterLink)
   app.config.globalProperties.$router = router
   app.config.globalProperties.$route = currentRoute
+  validateInitialNavigation() // the initial URL must pass the guards too
 }
 ```
 
@@ -156,11 +214,13 @@ router and route are reached with the `useRouter()` and `useRoute()` hooks.
 ## What we simplified
 
 The real Vue Router does far more: nested routes (several `<RouterView>` deep),
-named routes and views, lazy-loaded components, async guards with `next()`, query
-parameters and query-string parsing, scroll behavior, meta fields, and transition
-animations. We took the skeleton — history, a matcher with parameters, a reactive
-route, `RouterView`/`RouterLink`, `beforeEach` — which is enough to understand the
-principle and build a working multi-page application.
+named routes and views, lazy-loaded components, per-route guards (`beforeEnter`)
+and `afterEach` hooks, the `next()`-callback guard style, repeated query keys
+collected into arrays, scroll behavior, meta fields, and transition animations. We
+took the skeleton — history, a matcher with parameters and specificity, a reactive
+route with `query` and `hash`, `RouterView`/`RouterLink` with active classes, and
+`beforeEach` guards (sync and async, with a capped redirect chain) — which is
+enough to understand the principle and build a working multi-page application.
 
 ## Check yourself
 

@@ -33,8 +33,8 @@ app.directive('focus', {
 кортеж «директива, значение, аргумент, модификаторы»:
 
 ```js
-// <div v-focus> компилируется в:
-_wd(h("div", null, [...]), [[_dir("focus"), void 0, void 0, {}]])
+// <div v-focus></div> компилируется в:
+_wd(h("div", null, null), [[_dir("focus"), void 0, void 0, {}]])
 ```
 
 `_dir` (`resolveDirective`) находит директиву по имени — сначала в локальной опции
@@ -47,8 +47,10 @@ _wd(h("div", null, [...]), [[_dir("focus"), void 0, void 0, {}]])
 
 ```js
 function invokeDirectives(vnode, name) {
-  for (const binding of vnode.dirs || []) {
-    const hook = binding.dir[name]
+  const dirs = vnode.dirs
+  if (!dirs) return
+  for (const binding of dirs) {
+    const hook = binding.dir && binding.dir[name]
     if (hook) hook(vnode.el, binding, vnode)
   }
 }

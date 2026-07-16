@@ -11,5 +11,8 @@
     "e2e:shop": "node examples/shop/e2e.mjs"
   },
   "author": "Serik Muradov <sirserik@gmail.com>",
-  "license": "MIT"
+  "license": "MIT",
+  "devDependencies": {
+    "playwright": "^1.60.0"
+  }
 }

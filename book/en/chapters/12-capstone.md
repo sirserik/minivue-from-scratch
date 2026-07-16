@@ -23,23 +23,28 @@ The implementation picks the target of the change: for an options store it's the
 reactive state `pinia.state[id]`, for a setup store it's the store itself (a write
 through `proxyRefs` lands in the `.value` of the right ref). One change, one path.
 
-**`$subscribe`** runs a callback on any state change. It's a `watch` on top of our
-reactivity:
+**`$subscribe`** runs a callback on any state change. It's a deep `watch` on top of our
+reactivity, and it batches like Pinia: any number of synchronous mutations (say, one
+`$patch` of three keys) collapse into a single callback on the next microtask. The
+callback receives mutation info, `{ type, storeId }`, where `type` is `'direct'`,
+`'patch object'` or `'patch function'`:
 
 ```js
-store.$subscribe(() => console.log('store changed'))
+store.$subscribe((mutation, state) => console.log(mutation.type, state))
 ```
 
 A subtlety a test exposed: for a setup store you can't watch both the state and the
 getters at once. Otherwise a single change to `items` would fire twice — once from the
 ref itself and once from the `computed` that depends on it. So we filter out the
-computeds (they carry a `.effect`) and watch only the state fields. A small detail, but
-it shows how the layers connect: the store subscription leans on how `computed` from
-layer 1 is built.
+computeds (they carry a `.effect`) and deep-watch only the state refs — `{ deep: true }`
+makes the watcher walk inside ref values, so `items.value.push(...)` is seen too. A
+small detail, but it shows how the layers connect: the store subscription leans on how
+`computed` and `watch` from layer 1 are built.
 
 **`$reset`** returns the state to its initial values. It works for options stores, where
 the `state()` function that produces fresh values is known. A setup store has no initial
-snapshot, so `$reset` honestly warns that it's unavailable.
+snapshot, so `$reset` throws — exactly like Pinia (a setup store can expose its own
+reset action if it wants one).
 
 ## The final app
 
@@ -119,7 +124,7 @@ Thanks for going the whole way. You didn't learn Vue — you wrote it.
 ## Check yourself
 
 ```bash
-npm test        # all 105 tests across twelve layers
+npm test        # all 247 tests across twelve layers
 npm run serve   # http://localhost:5173/playground/12-capstone.html
 ```
 

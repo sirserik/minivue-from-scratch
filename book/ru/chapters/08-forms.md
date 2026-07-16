@@ -53,17 +53,28 @@ styleToString({ color: 'red', fontSize: '14px' }) // 'color:red;font-size:14px'
 
 - текстовый `input` и `textarea` → `:value` + `@input`;
 - `checkbox` → `:checked` + `@change` (и берём `$event.target.checked`);
+- `radio` → `:checked` + `@change`, где «включён» значит «модель равна значению
+  именно *этой* кнопки» — писать сюда `:value`, как для текста, нельзя: затёрли бы
+  значение, по которому кнопка себя узнаёт;
 - `select` → `:value` + `@change`.
 
 ```js
-directives.binds.push({ arg: prop, exp })                       // :value="name"
-directives.ons.push({ event, exp: `${exp} = $event.target.${field}` }) // @input="name = ..."
+// The value from the event, honoring the .trim / .number modifiers.
+// Both may be present at once: trim first, then convert (like Vue).
+let valueExpr = `$event.target.${field}`
+if (mods.includes('trim')) valueExpr = `${valueExpr}.trim()`
+if (mods.includes('number')) valueExpr = `Number(${valueExpr})`
+
+directives.binds.push({ arg: prop, exp })
+directives.ons.push({ event, exp: `${exp} = ${valueExpr}`, modifiers: [] })
 ```
 
-Дальше это идёт по обычному пути генерации props — никакого особого узла. Модели
-поддерживают и модификаторы: `.number` оборачивает значение в `Number(...)`,
-`.trim` — в `.trim()`. Тест «ввод обновляет состояние» проверяет обе стороны: и что
-состояние показывается в поле, и что ввод его меняет.
+Дальше это идёт по обычному пути генерации props — никакого особого узла.
+Модификаторы видны прямо в отрывке: `.trim` и `.number` преобразуют значение,
+прочитанное из события, а `.lazy` (строкой выше этого отрывка) подменяет событие
+на `change` — синхронизация по blur/Enter, а не на каждое нажатие. Тест «ввод
+обновляет состояние» проверяет обе стороны: и что состояние показывается в поле, и
+что ввод его меняет.
 
 Тонкость на стороне рантайма: для `value` и `checked` `patchProp` пишет не в
 атрибут, а в свойство элемента (`el.value`, `el.checked`). Атрибут задаёт лишь
@@ -87,16 +98,27 @@ directives.ons.push({ event, exp: `${exp} = $event.target.${field}` }) // @input
 
 ```js
 function genHandler(on) {
-  if (on.modifiers.length === 0) {
-    // без модификаторов — как раньше: ссылка на метод или инлайн-выражение
+  const exp = on.exp
+  // Listener options (.once/.capture/.passive) live in the prop name, not in
+  // the handler body — ignore them here.
+  const mods = (on.modifiers || []).filter((m) => !OPTION_MODS.includes(m))
+  const isMethodPath = /^[A-Za-z_$][\w$.]*$/.test(exp.trim())
+
+  // No modifiers — same as before (short code, backwards compatible).
+  if (mods.length === 0) {
     return isMethodPath ? `(${exp})` : `$event => (${exp})`
   }
+
+  // With modifiers — wrap in an arrow function with the checks.
   const guards = []
+  const keyMods = mods.filter((m) => KEY_MODS.includes(m))
   if (keyMods.length) guards.push(`if(!_key($event,${JSON.stringify(keyMods)}))return;`)
   if (mods.includes('stop')) guards.push('$event.stopPropagation();')
   if (mods.includes('prevent')) guards.push('$event.preventDefault();')
   if (mods.includes('self')) guards.push('if($event.target!==$event.currentTarget)return;')
-  return `$event => { ${guards.join('')} ${isMethodPath ? `${exp}($event)` : `(${exp})`} }`
+
+  const call = isMethodPath ? `${exp}($event)` : `(${exp})`
+  return `$event => { ${guards.join('')} ${call} }`
 }
 ```
 
@@ -105,19 +127,29 @@ function genHandler(on) {
 `'Enter'`). Тесты проверяют и сгенерированный код, и поведение: `@click.prevent`
 действительно зовёт `preventDefault`, а `@keyup.enter` срабатывает только на Enter.
 
+Три модификатора стоят особняком. `.once`, `.capture` и `.passive` — не проверки
+внутри обработчика, а опции самого `addEventListener`. Компилятор кодирует их
+суффиксами в имени пропа (`@click.once` → `onClickOnce`, см. `genProps`), а на
+стороне DOM `patchProp` снимает суффиксы обратно и передаёт опциями слушателя.
+Поэтому `genHandler` первым делом отфильтровывает их (`OPTION_MODS`) и строит
+проверки только из остальных.
+
 Важно, что путь «без модификаторов» мы оставили прежним — короткая ссылка `(inc)`
 или `$event => (count++)`. Так старый код и тесты из слоя 4 продолжают работать без
 изменений, а обёртка появляется только там, где реально есть модификаторы.
 
 ## Что мы упростили
 
-Настоящий Vue поддерживает больше: `v-model` на компонентах (с `modelValue` и
-`update:modelValue`), несколько моделей на одном компоненте, `.lazy`, привязку
-`v-model` к `radio` и множественному `select`, системные модификаторы клавиш
-(`.ctrl`, `.shift`), `.once`, `.capture`, `.passive`. Мы взяли самое ходовое —
-текстовые поля, чекбокс и select, объектный/массивный `class`/`style`,
-`.stop`/`.prevent`/`.self` и клавиши. Этого хватает, чтобы собрать полноценную
-форму, а принцип у остального ровно тот же.
+Настоящий Vue поддерживает больше: несколько моделей на одном компоненте
+(`v-model:title` — модель с аргументом), `v-model` на множественном `select`,
+динамический `:type` (для него нужна runtime-директива — наш компилятор выбирает
+тип поля только по статическому `type`), системные модификаторы клавиш (`.ctrl`,
+`.shift`, `.exact`) и кнопки мыши. Мы взяли самое ходовое — текстовые поля, чекбокс,
+radio и select, объектный/массивный `class`/`style`, `.stop`/`.prevent`/`.self` и
+клавиши, модификаторы значения `.lazy`/`.trim`/`.number` и опции слушателя
+`.once`/`.capture`/`.passive`. Этого хватает, чтобы собрать полноценную форму, а
+принцип у остального ровно тот же. `v-model` на собственных компонентах появится в
+главе о директивах.
 
 ## Проверяем себя
 

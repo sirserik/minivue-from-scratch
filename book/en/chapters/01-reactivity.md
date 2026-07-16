@@ -70,6 +70,8 @@ export class ReactiveEffect {
     this.scheduler = scheduler
     this.deps = []
     this.active = true
+    this.onStop = null       // optional hook run once when the effect is stopped
+    recordEffectScope(this)  // register in the current scope (see below)
   }
 
   run() {
@@ -93,6 +95,12 @@ sees this `activeEffect` and records the dependency. As soon as the function
 finishes, we pop ourselves off the stack and restore whoever was active before us.
 The `try/finally` wrapper guarantees the active effect is restored even if an error
 happens inside.
+
+The two extra lines in the constructor belong to `EffectScope` — a "basket" in the
+same file that collects every effect created while it's active (`recordEffectScope`),
+so a whole group can be stopped with one `scope.stop()`. The component layer will use
+it later: a component gathers its render effect and watchers into a scope and
+disconnects them all at once on unmount.
 
 We'll cover `scheduler` and `cleanup` shortly — first let's see how the dependencies
 are stored.
@@ -119,7 +127,7 @@ The `track` function fills this structure in:
 
 ```js
 export function track(target, key) {
-  if (!activeEffect) return          // no one is listening — bail out
+  if (!activeEffect || !shouldTrack) return  // no one listening (or tracking paused)
 
   let depsMap = targetMap.get(target)
   if (!depsMap) targetMap.set(target, (depsMap = new Map()))
@@ -131,7 +139,8 @@ export function track(target, key) {
 }
 
 export function trackEffects(dep) {
-  if (!activeEffect) return
+  if (!activeEffect || !shouldTrack) return
+  if (dep.has(activeEffect)) return  // already linked during this run
   dep.add(activeEffect)              // dep knows about the effect
   activeEffect.deps.push(dep)        // the effect knows about the dep
 }
@@ -139,26 +148,58 @@ export function trackEffects(dep) {
 
 Notice the two-way link in `trackEffects`. The `dep` remembers the effect — so it
 can wake it up later. But the effect also remembers the `dep` (in its `deps` array) —
-which we'll need for cleanup, covered below.
+which we'll need for cleanup, covered below. The `shouldTrack` flag is a global pause
+switch (`pauseTracking`/`resetTracking` in the same file): array mutators like
+`push()` read the array as a side effect of writing, and without the pause an effect
+that pushes would subscribe to its own reads.
 
 The reverse operation is `trigger`:
 
 ```js
-export function trigger(target, key) {
+export function trigger(target, key, type = 'set', newValue) {
   const depsMap = targetMap.get(target)
   if (!depsMap) return               // no one read this object
-  const dep = depsMap.get(key)
-  if (!dep) return
-  triggerEffects(dep)
+
+  // Collect every dep set the change affects, then fire them all at once.
+  const deps = []
+
+  if (type === 'clear') {
+    deps.push(...depsMap.values())   // collection.clear(): every key is gone
+  } else if (key === 'length' && Array.isArray(target)) {
+    // … arr.length shrank: wake 'length' readers and removed indices …
+  } else {
+    deps.push(depsMap.get(key))
+    // … 'add'/'delete' (and map.set) also wake iteration effects:
+    //   depsMap.get(ITERATE_KEY) or the array's 'length' …
+  }
+
+  // Merge into one set so an effect subscribed to several deps runs once.
+  const effects = new Set()
+  for (const dep of deps) {
+    if (dep) dep.forEach((effect) => effects.add(effect))
+  }
+  triggerEffects(effects)
 }
 
 export function triggerEffects(dep) {
   const effects = [...dep]           // a copy! (explained below)
+
+  // Pass 1: computed effects go FIRST — their caches must be invalidated
+  // before plain effects read them.
   for (const effect of effects) {
-    if (effect === activeEffect) continue   // don't wake ourselves
-    if (effect.scheduler) effect.scheduler()
-    else effect.run()
+    if (effect.computed) triggerEffect(effect)
   }
+  // Pass 2: plain effects.
+  // … the full file also skips effects that pass 1 already re-ran …
+  for (const effect of effects) {
+    if (!effect.computed) triggerEffect(effect)
+  }
+}
+
+function triggerEffect(effect) {
+  if (effect === activeEffect) return     // don't wake ourselves
+  if (effect.scheduler) effect.scheduler()
+  else effect.run()
 }
 ```
 
@@ -169,39 +210,83 @@ Two subtleties, each of which would otherwise cost hours of debugging:
    `Set` you're currently looping over is a sure way to get an infinite loop or a
    skipped element. We iterate over the copy — let the original change freely.
 
-2. **`if (effect === activeEffect) continue`** — protection against self-re-running.
-   If you write `count.value++` inside an effect, it reads and writes `count` at the
-   same time. Without this line it would wake itself up forever.
+2. **`if (effect === activeEffect) return`** in `triggerEffect` — protection against
+   self-re-running. If you write `count.value++` inside an effect, it reads and
+   writes `count` at the same time. Without this line it would wake itself up
+   forever.
+
+Two more decisions live in this code. The `type` argument distinguishes changing a
+value from adding or removing a key — the latter also wakes iteration effects
+(`for…in`, array `length`, Map/Set `size`), which subscribe under the special
+`ITERATE_KEY`, since an iteration has no single property to depend on. And
+`triggerEffects` makes two passes: computed effects run first, so a plain effect
+that reads both a value and a computed built on it never sees a stale cache (the
+classic "glitch").
 
 ## reactive: intercepting an object with Proxy
 
 Now let's make a plain object call `track` and `trigger` automatically. The tool is
-`Proxy`. In the `get` trap we call `track`, in the `set` trap we call `trigger`.
+`Proxy`. In the `get` trap we call `track`, in the `set` trap we call `trigger`. The
+real file builds these traps with a factory — the same `createGetter`/`createSetter`
+serve `reactive`, `shallowReactive` and `readonly` (chapter 9), differing only in two
+flags:
 
 ```js
-// packages/reactivity/reactive.js
-export function reactive(target) {
-  if (!isObject(target)) return target
-  // ... guard against double-wrapping ...
+// packages/reactivity/reactive.js  (the get and set traps, abridged)
+function createGetter(isReadonly = false, isShallow = false) {
+  return function get(obj, key, receiver) {
+    // … internal markers, instrumented array methods, engine symbols …
 
-  return new Proxy(target, {
-    get(obj, key, receiver) {
-      const result = Reflect.get(obj, key, receiver)
-      track(obj, key)                      // "I was read"
-      if (isObject(result)) return reactive(result)  // depth on demand
-      return result
-    },
-    set(obj, key, value, receiver) {
-      const oldValue = obj[key]
-      const result = Reflect.set(obj, key, value, receiver)
-      if (hasChanged(oldValue, value)) trigger(obj, key)  // "I was changed"
-      return result
-    },
-  })
+    const result = Reflect.get(obj, key, receiver)
+
+    if (!isReadonly) track(obj, key)   // "I was read"
+
+    if (isShallow) return result
+
+    // A ref inside a reactive object unwraps automatically: state.count,
+    // not state.count.value (arrays are the exception).
+    if (isRef(result)) {
+      return Array.isArray(obj) && isIntegerKey(key) ? result : result.value
+    }
+
+    if (isObject(result)) {
+      return isReadonly ? readonly(result) : reactive(result) // depth on demand
+    }
+
+    return result
+  }
+}
+
+function createSetter(isShallow = false) {
+  return function set(obj, key, value, receiver) {
+    let oldValue = obj[key]
+    // … a ref at this key absorbs the write into its .value;
+    //   oldValue and value are compared "raw", via toRaw …
+
+    const hadKey =
+      Array.isArray(obj) && isIntegerKey(key)
+        ? Number(key) < obj.length
+        : Object.prototype.hasOwnProperty.call(obj, key)
+
+    const result = Reflect.set(obj, key, value, receiver)
+    // … prototype-chain guard: only the object actually written to triggers …
+
+    if (!hadKey) {
+      trigger(obj, key, 'add')         // a new key appeared
+    } else if (hasChanged(oldValue, value)) {
+      trigger(obj, key, 'set', value)  // an existing key got a new value
+    }
+
+    return result
+  }
+}
+
+export function reactive(target) {
+  return createReactiveObject(target, mutableHandlers, reactiveMap)
 }
 ```
 
-Three decisions worth spelling out.
+Four decisions worth spelling out.
 
 **Deep reactivity on demand.** If a read property turns out to be an object itself,
 we wrap it in `reactive` right at that moment — not ahead of time, recursively across
@@ -215,6 +300,24 @@ different. Assigning the same value shouldn't wake the interface.
 **`Reflect` instead of `obj[key]`.** On objects with getters and inheritance, direct
 access loses the correct `this`. `Reflect.get/set` with `receiver` preserves it. On
 plain objects there's no difference, but it's worth getting used to the correct form.
+
+**Refs unwrap automatically.** A ref stored inside a reactive object is read as
+`state.count`, not `state.count.value` — the getter returns its `.value`, and the
+setter writes an assigned non-ref into it. Arrays are the exception: `arr[0]` may
+legitimately hold a ref (Vue semantics).
+
+`createReactiveObject` at the bottom of the file holds the plumbing: it caches the
+proxy per target (so `reactive(obj)` twice returns the same proxy), returns
+primitives, `markRaw`'d objects and non-proxyable ones (Date, RegExp, class instances
+with internal slots) unchanged, and picks a different handler set for Map/Set — their
+methods work on hidden internal slots a Proxy doesn't have, so the file replaces them
+with "instrumented" versions that call `track`/`trigger` by hand. Arrays get the same
+treatment for a handful of methods: `includes`/`indexOf`/`lastIndexOf` also search
+the raw array (elements come out wrapped, so an identity search would miss), and
+`push`/`pop`/`shift`/`unshift`/`splice` pause tracking while they run, so a writer
+doesn't subscribe to its own incidental reads. Iteration — `for…in`, `Object.keys`, a
+collection's `size` and `forEach` — is tracked under `ITERATE_KEY`, the key we saw in
+`trigger`.
 
 ## ref: reactivity for a single value
 
@@ -268,7 +371,9 @@ scheduler, plus a "dirty" flag.
 ```js
 // packages/reactivity/computed.js
 class ComputedRefImpl {
-  constructor(getter) {
+  constructor(getter, setter) {
+    this._value = undefined
+    this._setter = setter
     this._dirty = true             // whether a recompute is needed
     this.dep = new Set()
     this.__isRef = true
@@ -278,6 +383,7 @@ class ComputedRefImpl {
         triggerEffects(this.dep)   // and wake whoever read the computed
       }
     })
+    this.effect.computed = true    // "invalidate me before plain effects"
   }
   get value() {
     if (activeEffect) trackEffects(this.dep)
@@ -287,6 +393,7 @@ class ComputedRefImpl {
     }
     return this._value
   }
+  // … set value(v) hands the write to the setter — a writable computed …
 }
 ```
 
@@ -297,6 +404,11 @@ recomputing, its scheduler only raises the `_dirty` flag and wakes the readers. 
 actual recompute happens in `get value`, and only if someone actually asks for the
 result. Read it twice without changes, and the second read comes from the cache — the
 `getter` doesn't run.
+
+The `this.effect.computed = true` mark is the flag `triggerEffects` uses to
+invalidate computeds before plain effects run. The setter makes a writable computed
+possible: `computed({ get, set })` forwards assignments to your `set`, while a
+getter-only computed just warns.
 
 ## Why cleanup is needed: the branching problem
 
@@ -336,7 +448,7 @@ branches, a change to the old variable no longer wakes the effect.
 
 `effect` just re-runs a function. `watch` is a layer on top that, on a change, calls a
 callback and passes it the new and old values. The source can be a `ref`, a getter
-function, or an entire `reactive` object.
+function, an entire `reactive` object, or an array of such sources.
 
 The idea: reduce any source to a getter function, wrap it in an effect, and put the
 whole "reaction" in the scheduler — it computes the new value and calls the callback.
@@ -346,17 +458,24 @@ whole "reaction" in the scheduler — it computes the new value and calls the ca
 let oldValue
 const job = () => {
   const newValue = effect.run()
-  callback(newValue, oldValue)
+  // … skip if nothing actually changed …
+  callback(newValue, oldValue, onCleanup)
   oldValue = newValue
 }
-const effect = new ReactiveEffect(getter, job)
+// 'sync' fires right inside the mutation; the default ('pre') batches the job
+// into a microtask queue — three synchronous writes mean one callback call.
+const scheduler = flush === 'sync' ? job : () => queueWatchJob(job)
+const effect = new ReactiveEffect(getter, scheduler)
 oldValue = effect.run()          // first run: collect dependencies, remember the start
 ```
 
 For a `reactive` object, to watch it "deeply," a `traverse` walk is used — it
-recursively reads every nested property, thereby subscribing the effect to each level.
-`immediate: true` makes the callback fire right away, without waiting for the first
-change.
+recursively reads every nested property, thereby subscribing the effect to each level
+(`deep: true` does the same for any source, and an array of sources is reduced to a
+getter over all of them). `immediate: true` makes the callback fire right away,
+`once: true` stops the watcher after the first call. The callback's third argument,
+`onCleanup`, registers a function that runs before the next invocation and on stop —
+the standard way to cancel a request that a newer value has made stale.
 
 ## How it all works together
 
@@ -388,7 +507,7 @@ Run the tests:
 npm test
 ```
 
-Thirteen checks in `test/reactivity.test.mjs` confirm every property: `ref` and
+Fourteen checks in `test/reactivity.test.mjs` confirm every property: `ref` and
 `reactive` react, `computed` is lazy and caches, `cleanup` unsubscribes from the
 unneeded, `watch` hands back old and new. Then open the demo:
 

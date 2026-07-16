@@ -7,8 +7,8 @@
 самостоятельную, повторно используемую единицу.
 
 Код главы: `packages/runtime-core/component.js`, `scheduler.js`, `apiLifecycle.js`,
-`apiInject.js`, `apiCreateApp.js`. Тесты — `test/component.test.mjs`, демо —
-`playground/03-components.html`.
+`apiInject.js`, `apiCreateApp.js`, `errorHandling.js`. Тесты — `test/component.test.mjs`,
+демо — `playground/03-components.html`.
 
 ## Что такое компонент
 
@@ -39,8 +39,9 @@ const Counter = {
 своим счётчиком. Значит, у каждого вхождения должно быть своё состояние. Его хранит
 **инстанс** — объект, который заводится на каждое появление компонента
 (`createComponentInstance`). В нём лежит всё: разобранные `props`, `slots`,
-результат `setup` (`setupState`), последнее отрисованное дерево (`subTree`), флаг
-`isMounted`, функция обновления `update` и ссылка на родителя.
+результат `setup` (`setupState`), последнее отрисованное дерево (`subTree`), флаги
+`isMounted`/`isUnmounted`, effect-scope (`scope`), собирающий всё реактивное, что
+компонент создаёт, функция обновления `update` и ссылка на родителя.
 
 ## setup и публичный контекст
 
@@ -48,13 +49,27 @@ const Counter = {
 и запускает `setup`.
 
 ```js
-const setupResult = setup(instance.props, setupContext)
+let setupResult
+try {
+  setupResult = instance.scope.run(() => setup(instance.props, setupContext))
+} catch (err) {
+  handleError(err, instance, 'setup function') // пользовательский код может упасть
+} finally {
+  setCurrentInstance(null) // сбрасываем «текущий» инстанс всегда, даже после throw
+}
+
 if (typeof setupResult === 'function') {
   instance.render = setupResult          // setup вернул саму render-функцию
 } else if (setupResult && typeof setupResult === 'object') {
   instance.setupState = proxyRefs(setupResult) // объект состояния
 }
 ```
+
+Здесь две детали. `setup` выполняется внутри *effect-scope* инстанса: каждый watcher
+и computed, созданный в нём, попадает в `instance.scope`, и при размонтировании все
+они остановятся одним вызовом. И раз `setup` — пользовательский код, его падение не
+срывает монтирование: `handleError` ведёт ошибку по цепочке `onErrorCaptured` к
+`app.config.errorHandler` (см. `errorHandling.js` и раздел о жизненном цикле ниже).
 
 Обратите внимание на `proxyRefs` из слоя 1. Он оборачивает возвращённый объект так,
 что `.value` у ref'ов разворачивается автоматически. Поэтому в `render` пишут
@@ -78,20 +93,34 @@ if (typeof setupResult === 'function') {
 
 ```js
 const componentUpdateFn = () => {
+  if (instance.isUnmounted) return // залежавшаяся задача не должна трогать мёртвый компонент
+  // …
   if (!instance.isMounted) {
     const subTree = (instance.subTree = renderComponentRoot(instance))
     patch(null, subTree, container, anchor) // первый раз — монтируем
+    instance.vnode.el = subTree.el
     instance.isMounted = true
+    pendingPostHooks = instance.m // onMounted — сработает позже, см. ниже
   } else {
+    // …
     const nextTree = renderComponentRoot(instance)
     const prevTree = instance.subTree
     instance.subTree = nextTree
     patch(prevTree, nextTree, container, anchor) // потом — diff со старым деревом
+    instance.vnode.el = nextTree.el
+    pendingPostHooks = instance.u // onUpdated
   }
 }
-const effect = new ReactiveEffect(componentUpdateFn, () => queueJob(instance.update))
-instance.update = effect.run.bind(effect)
-instance.update() // запуск = монтирование
+const effect = instance.scope.run(
+  () => new ReactiveEffect(componentUpdateFn, () => queueJob(instance.update)),
+)
+const update = (instance.update = () => {
+  effect.run()
+  // … здесь, уже вне эффекта, срабатывают отложенные onMounted/onUpdated
+})
+update.id = instance.uid
+update.i = instance
+update() // первый запуск = монтирование
 ```
 
 Когда `componentUpdateFn` первый раз выполняет `render`, тот читает реактивное
@@ -104,6 +133,16 @@ instance.update() // запуск = монтирование
 diff из слоя 2 вносит минимальную правку. Так реактивность отвечает на вопрос
 «когда перерисовать», а рендерер — «как перерисовать дёшево».
 
+На трёх деталях стоит задержаться. Проверка `isUnmounted` — последний рубеж: если
+обновление встало в очередь в том же тике, в котором родитель убрал компонент, оно
+не должно трогать DOM. Эффект создаётся внутри `instance.scope`, поэтому
+размонтирование останавливает его вместе со всеми watcher'ами из `setup` одним
+вызовом. А `onMounted`/`onUpdated` срабатывают *после* возврата из `effect.run()`:
+внутри эффекта защита от самозапуска в реактивности молча проглотила бы изменение
+состояния из хука, и хук, меняющий состояние, никогда не дождался бы повторной
+перерисовки. `id` у задачи позволяет планировщику держать порядок
+«родитель раньше ребёнка»; `.i` говорит, чья это задача, — для маршрутизации ошибок.
+
 ## Планировщик: три изменения — одна перерисовка
 
 Если в обработчике поменять три реактивных значения подряд, наивный эффект
@@ -112,15 +151,21 @@ diff из слоя 2 вносит минимальную правку. Так р
 
 ```js
 export function queueJob(job) {
-  if (!queue.includes(job)) {   // один компонент в очереди максимум раз
-    queue.push(job)
+  // дедупликация — но только по ещё не выполненной части очереди
+  if (!queue.includes(job, isFlushing ? flushIndex + 1 : 0)) {
+    if (!isFlushing) {
+      queue.push(job)
+    } else {
+      // … задача, пришедшая посреди flush, вставляется по id сразу за бегущей
+    }
     queueFlush()
   }
 }
 function queueFlush() {
-  if (isFlushing) return
-  isFlushing = true
-  resolvedPromise.then(flushJobs) // разберём очередь в конце текущего тика
+  if (!isFlushPending && !isFlushing) {
+    isFlushPending = true
+    currentFlushPromise = resolvedPromise.then(flushJobs)
+  }
 }
 ```
 
@@ -128,31 +173,69 @@ function queueFlush() {
 выполнится, как только закончится текущий синхронный код. Все изменения к этому
 моменту уже случились, компонент в очереди один раз — значит, одна перерисовка. Это
 и есть «батчинг». Тест «несколько изменений подряд = одна перерисовка» это
-подтверждает.
+подтверждает. `flushJobs` сортирует очередь по возрастанию id задач (у родителя id
+меньше, чем у ребёнка, поэтому он обновляется первым — и может убрать ребёнка до
+его очереди) и запускает каждую задачу в собственном try/catch: компонент, упавший
+в render, не отменяет остальные обновления тика — ошибка уходит по цепочке
+`onErrorCaptured` из `errorHandling.js`.
 
 Отсюда же берётся `nextTick`. Раз обновление DOM отложено, иногда нужно дождаться
 его — например, чтобы измерить уже обновлённый элемент. `await nextTick()` возвращает
 управление после того, как очередь разобрана и DOM актуален.
 
+### Грабля: задача, ставящая в очередь саму себя
+
+Первая версия дедуплицировала простым `queue.includes(job)`. Звучит разумно — пока
+задача не поставит в очередь *саму себя* посреди flush: `onUpdated` меняет
+состояние, эффект срабатывает, `queueJob` находит в массиве ещё выполняющуюся
+задачу и молча выбрасывает повторное обновление — навсегда. Поэтому дедупликация
+теперь ищет только в ещё не выполненной части очереди — `includes(job, flushIndex +
+1)`: бегущая задача может встать снова, а пришедшая посреди flush вставляется по
+id, чтобы родители по-прежнему обновлялись раньше детей.
+
 ## props: данные сверху вниз
 
 Родитель передаёт компоненту данные через атрибуты его VNode: `h(Child, { label:
-'привет' })`. Компонент объявляет, что из этого — его `props`, списком `props:
-['label']`. Всё объявленное попадает в `instance.props`, всё прочее (например,
-`class`, повешенный снаружи) — в `attrs`.
+'привет' })`. Компонент объявляет, что из этого — его `props`: либо списком `props:
+['label']`, либо объектом с настройками на каждый prop: `props: { step: { type:
+Number, default: 1, required: false } }` (голый конструктор, `step: Number`, —
+сокращение для `{ type }`). Всё объявленное попадает в `instance.props`, всё прочее
+(например, `class`, повешенный снаружи) — в `attrs`.
 
 ```js
 for (const key in raw) {
+  if (key === 'key') continue
   if (options.has(key)) props[key] = raw[key]  // объявленный prop
   else attrs[key] = raw[key]                    // «сквозной» атрибут
 }
+// Object-syntax extras: defaults for absent props, required/type warnings.
+for (const [key, opt] of options) {
+  if (key in props) {
+    validatePropType(key, props[key], opt)
+  } else {
+    if (opt.required) console.warn(`[minivue] Missing required prop: "${key}"`)
+    if ('default' in opt) props[key] = resolvePropDefault(opt)
+  }
+}
 instance.props = reactive(props) // делаем props реактивными
 ```
+
+Объектная форма проверяется по-девелоперски: неправильный тип или отсутствующий
+`required`-prop даёт `console.warn`, но никогда не исключение. Дефолт-объект или
+массив обязан быть функцией-фабрикой (`resolvePropDefault` её вызывает) — иначе все
+инстансы делили бы один изменяемый объект.
 
 `props` — реактивные, и это важно. Когда родитель перерисуется и передаст новое
 значение, `updateComponent` вызовет `updateProps`, тот запишет новое значение в
 реактивный `props`, и любой, кто читал этот prop в `render`, computed или watch,
 отреагирует. В тесте «родитель передаёт, ребёнок обновляет» именно это и происходит.
+
+`attrs` тоже не лежат в инстансе мёртвым грузом. После каждой отрисовки
+`renderComponentRoot` сливает их на единственный корневой элемент компонента:
+`class` и `style` объединяются, обработчики событий срабатывают оба, для остального
+побеждает внешнее значение. Именно поэтому `h(Button, { class: 'primary' })`
+работает без объявления `class` в `Button`; компонент может отказаться через
+`inheritAttrs: false`, а корню-фрагменту не достаётся ничего (их некуда класть).
 
 ## emit: события снизу вверх
 
@@ -162,15 +245,20 @@ instance.props = reactive(props) // делаем props реактивными
 
 ```js
 function emit(instance, event, ...args) {
-  const handlerName = 'on' + event[0].toUpperCase() + event.slice(1)
-  const handler = instance.vnode.props[handlerName] // onIncrement
-  if (handler) handler(...args)
+  const props = instance.vnode.props || {}
+  // сначала точное имя, потом camelCase-форма ('value-change' → onValueChange)
+  const handler = props[toHandlerKey(event)] || props[toHandlerKey(camelize(event))]
+  if (handler) callWithErrorHandling(handler, instance, `"${event}" event handler`, args)
 }
 ```
 
 `emit('ping', 42)` ищет в props компонента функцию `onPing` и вызывает её с `42`.
 Так ребёнок сообщает, а родитель реагирует — данные текут вниз, события всплывают
-вверх. Это базовый контракт общения компонентов.
+вверх. Это базовый контракт общения компонентов. Две мелочи повторяют настоящий
+Vue: kebab-case событие (`emit('value-change')`, стиль шаблонов) камелизуется и всё
+равно находит `onValueChange`, а обработчик выполняется через
+`callWithErrorHandling` — упавший обработчик родителя уходит по цепочке ошибок, а
+не раскручивает стек через `render` ребёнка, вызвавшего `emit`.
 
 ## slots: разметка снаружи
 
@@ -216,6 +304,15 @@ const Card = {
 дойдя до стадии, вызывает весь список. `onMounted` удобен для запроса данных с
 сервера (элемент уже на странице), `onUnmounted` — для уборки (снять таймер,
 отписаться).
+
+Кроме них есть `onActivated`/`onDeactivated` — они срабатывают, когда `KeepAlive`
+(слой 11) прячет компонент вместо разрушения, — и `onErrorCaptured`, превращающий
+компонент в границу ошибок: ошибка из `setup`, `render`, хуков или обработчиков
+потомка поднимается по цепочке `onErrorCaptured`-хуков (вернуть `false` — остановить
+её), затем попадает в `app.config.errorHandler`, затем в `console.error` — весь
+маршрут живёт в `errorHandling.js`. Хуки — тоже пользовательский код, поэтому
+`invokeHooks` оборачивает каждый в `callWithErrorHandling`: упавший `onMounted` не
+сорвёт монтирование и не помешает соседним хукам.
 
 ## createApp: точка входа
 

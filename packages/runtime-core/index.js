@@ -10,6 +10,7 @@ export { createRenderer } from './renderer.js'
 // Components
 export {
   createComponentSystem,
+  defineComponent,
   getCurrentInstance,
   registerRuntimeCompiler,
   createAppContext,
@@ -17,7 +18,10 @@ export {
 export { createAppAPI } from './apiCreateApp.js'
 
 // Scheduler
-export { nextTick, queueJob } from './scheduler.js'
+export { nextTick, queueJob, invalidateJob } from './scheduler.js'
+
+// Error handling (see errorHandling.js for the propagation order)
+export { callWithErrorHandling, handleError } from './errorHandling.js'
 
 // Lifecycle hooks
 export {
@@ -27,6 +31,9 @@ export {
   onUpdated,
   onBeforeUnmount,
   onUnmounted,
+  onActivated,
+  onDeactivated,
+  onErrorCaptured,
 } from './apiLifecycle.js'
 
 // provide / inject
@@ -52,5 +59,8 @@ export {
   shallowReactive,
   readonly,
   isReadonly,
+  isReactive,
+  isProxy,
+  toRaw,
   markRaw,
 } from '../reactivity/index.js'

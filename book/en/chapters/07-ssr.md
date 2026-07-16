@@ -21,27 +21,50 @@ only a walk over the tree and some string concatenation. That's the job of
 
 ```js
 function renderVNode(vnode, parentComponent) {
+  vnode = normalizeVNode(vnode)
   const { type } = vnode
-  if (type === Text) return escapeHtml(vnode.children)
-  if (type === Fragment) return renderChildren(vnode.children, parentComponent)
-  if (typeof type === 'string') return renderElement(vnode, parentComponent)
-  // component:
-  const { instance, subTree } = createSSRComponent(vnode, parentComponent)
-  return renderVNode(subTree, instance)
+
+  if (type === Text) {
+    return escapeHtml(vnode.children)
+  }
+  if (type === Fragment) {
+    return renderChildren(vnode.children, parentComponent)
+  }
+  if (typeof type === 'string') {
+    return renderElement(vnode, parentComponent)
+  }
+  if (typeof type === 'object' || typeof type === 'function') {
+    // component: create an instance, run setup, serialize the subtree
+    const { instance, subTree } = createSSRComponent(vnode, parentComponent)
+    // async setup() returns a Promise — a synchronous renderer must fail loudly
+    if (instance.setupState && typeof instance.setupState.then === 'function') {
+      throw new Error('async setup() is not supported by this renderToString')
+    }
+    return renderVNode(subTree, instance)
+  }
+  return ''
 }
 ```
 
 A text node becomes escaped text, an element becomes the string
-`<tag attributes>children</tag>`, a component becomes the result of its `render`.
-For a component on the server we create an instance and run `setup`
+`<tag attributes>children</tag>` (void tags like `<img>` or `<input>` — the full
+HTML set of fourteen — get no closing tag), a component becomes the result of its
+`render`. For a component on the server we create an instance and run `setup`
 (`createSSRComponent`), but we don't set up a reactive effect: the server has
-nothing to re-render, it needs a single snapshot.
+nothing to re-render, it needs a single snapshot. And if `setup` returned a
+Promise (async `setup`), our synchronous renderer can't await it — instead of
+silently serializing `undefined` everywhere the state should be, it fails loudly
+with an explicit error.
 
-Two details matter for correct HTML. First, **event handlers aren't serialized**:
+Three details matter for correct HTML. First, **event handlers aren't serialized**:
 `onClick` makes no sense in HTML, the handler will be attached on the client.
 Second, **escaping**: user data goes through `escapeHtml`, otherwise the string
 `<script>` inside text would turn into executable code (XSS). The test
-"escaping against XSS" checks exactly this.
+"escaping against XSS" checks exactly this. Third, **attribute names**: a value
+can be escaped, a name cannot — HTML simply has no escape syntax there — so a
+name containing spaces, quotes, `<`, `>`, `/` or `=` would break out of its
+position and inject markup. Like Vue's `isSSRSafeAttrName`, we refuse to render
+such names.
 
 ## createSSRApp
 
@@ -87,22 +110,35 @@ doesn't create a new one — it links the VNode to the real node it finds
 (`vnode.el = node`) and adds whatever the HTML lacks, above all event handlers:
 
 ```js
-function hydrateNode(node, vnode) {
+function hydrateNode(node, vnode, container) {
   vnode = normalizeVNode(vnode)
   const { type } = vnode
-  if (type === Text) { vnode.el = node; return node.nextSibling }
+  const parent = (node && hostParentNode(node)) || container
+
+  if (type === Text) {
+    // … mismatch checks; split a browser-merged text node if needed (see below)
+    vnode.el = node
+    return hostNextSibling(node)
+  }
+  // … (Fragment: insert the invisible anchors and hydrate the children in place)
   if (typeof type === 'string') {
-    vnode.el = node                             // adopt the existing element
+    // … tag mismatch check → warn and fall back to a client render of this subtree
+    vnode.el = node                              // adopt the existing element
     for (const key in vnode.props) {
       if (key !== 'key') hostPatchProp(node, key, null, vnode.props[key]) // attach events
     }
-    let cur = node.firstChild
-    for (const child of vnode.children) cur = hydrateNode(cur, child)      // recurse into children
-    return node.nextSibling
+    if (Array.isArray(vnode.children)) {
+      let cur = node.firstChild
+      for (let i = 0; i < vnode.children.length; i++) {
+        const child = (vnode.children[i] = normalizeVNode(vnode.children[i]))
+        cur = hydrateNode(cur, child, node)      // recurse into children
+      }
+    }
+    return hostNextSibling(node)
   }
   // component — adopted "on top of" the node, with a reactive effect set up
-  hydrateComponentImpl(vnode, node)
-  return node ? node.nextSibling : null
+  hydrateComponentImpl(vnode, node, parent)
+  return getNextHostNode(vnode)
 }
 ```
 
@@ -112,6 +148,11 @@ DOM through `hydrateNode`. A normal reactive effect is set up in the process —
 from then on the component lives as usual: state changes, `patch` runs, but now
 over the adopted nodes.
 
+And when the server DOM and the client vnode genuinely disagree — a different tag,
+different text — hydration doesn't crash: `handleHydrationMismatch` warns and falls
+back to a client-side render of that subtree, mounting the vnode fresh in place of
+the stale node (for text, it trusts the client and overwrites).
+
 The test "hydrate adopts the DOM, attaches events, and updates" checks all of this
 strictly: the server-side button node and the client-side one after hydration are
 the same object (`Object.is`), meaning the node wasn't recreated; a handler appeared
@@ -119,16 +160,27 @@ on it; and a click changes state and patches that same button. That's exactly ho
 after hydration, the static server HTML becomes a full-fledged SPA without a single
 needless recreation.
 
+## A gotcha: the browser merges adjacent text nodes
+
+The server writes `<button>Clicks: 0</button>` as two text chunks — the static
+`Clicks: ` and the dynamic `0` — but the HTML parser glues them into ONE DOM text
+node, while the client vdom still holds two text vnodes. Naive hydration adopted
+the merged node for the first vnode, asked for `nextSibling`, and walked off the
+real DOM — everything after that point was mismatched. The fix in `hydrateNode`:
+if the DOM text *starts with* the vnode's text, `splitText` cuts off the adopted
+half and leaves the remainder for the next vnode.
+
 ## What we simplified
 
 Real SSR in Vue is more involved in the details: it inserts comment nodes as anchors
-for fragments and portals, carefully compares the server and client output and
-complains about discrepancies (hydration mismatch), serializes and transfers store
-state to the client (`window.__INITIAL_STATE__`), supports streaming rendering, async
-`setup` and `Suspense`, and fragment caching. We built the skeleton — rendering a
-tree to a string with escaping, an isomorphic server, and hydration that adopts
-nodes and attaches events — which is enough to understand how SSR works and to build
-a working example.
+for fragments and portals, serializes and transfers store state to the client
+(`window.__INITIAL_STATE__`), supports streaming rendering, async `setup` and
+`Suspense` (ours throws an explicit error instead of silently serializing a
+Promise), and fragment caching; its mismatch handling is also far subtler than our
+warn-and-rerender fallback. We built the skeleton — rendering a tree to a string
+with escaping, an isomorphic server, and hydration that adopts nodes, attaches
+events, survives browser-merged text nodes, and recovers from mismatches — which is
+enough to understand how SSR works and to build a working example.
 
 ## Check yourself
 

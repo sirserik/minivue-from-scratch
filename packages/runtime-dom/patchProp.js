@@ -36,16 +36,35 @@ function isEventKey(key) {
   return /^on[A-Z]/.test(key)
 }
 
-// onClick → 'click'. Strip 'on' and lowercase the rest.
-function eventName(key) {
-  return key.slice(2).toLowerCase()
+// onClick → { name: 'click', options: {} }. Strip 'on' and lowercase the rest.
+// The compiler encodes the .once/.capture/.passive event modifiers as SUFFIXES
+// on the prop name (@click.once → onClickOnce), because they are not guards
+// inside the handler — they are options of addEventListener itself. Here we
+// peel them back off. (Coordinated with genProps in packages/compiler.)
+function parseEventKey(key) {
+  let name = key.slice(2)
+  const options = {}
+  let found = true
+  while (found) {
+    found = false
+    for (const opt of ['Once', 'Capture', 'Passive']) {
+      if (name.endsWith(opt)) {
+        options[opt.toLowerCase()] = true
+        name = name.slice(0, -opt.length)
+        found = true
+      }
+    }
+  }
+  return { name: name.toLowerCase(), options }
 }
 
 function patchEvent(el, key, prevValue, nextValue) {
-  const name = eventName(key)
+  const { name, options } = parseEventKey(key)
   // Remove the old handler if there was one, then attach the new one.
-  if (prevValue) el.removeEventListener(name, prevValue)
-  if (nextValue) el.addEventListener(name, nextValue)
+  // `capture` must be passed on removal too — the browser treats the same
+  // handler with and without capture as two different listeners.
+  if (prevValue) el.removeEventListener(name, prevValue, options)
+  if (nextValue) el.addEventListener(name, nextValue, options)
 }
 
 function patchStyle(el, prev, next) {

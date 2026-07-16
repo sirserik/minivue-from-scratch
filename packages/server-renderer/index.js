@@ -16,8 +16,13 @@ import { Text, Fragment, createVNode, normalizeVNode } from '../runtime-core/vno
 import { createSSRComponent, createAppContext } from '../runtime-core/component.js'
 import { normalizeClass, styleToString } from '../shared.js'
 
-// Void tags: no content and no closing tag.
-const VOID_TAGS = new Set(['br', 'hr', 'img', 'input', 'meta', 'link'])
+// Void tags: no content and no closing tag (the full HTML void-element set —
+// a stray </source> or </wbr> would be invalid markup the browser "repairs"
+// unpredictably, breaking hydration's node-by-node walk).
+const VOID_TAGS = new Set([
+  'area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input',
+  'link', 'meta', 'param', 'source', 'track', 'wbr',
+])
 
 /**
  * Render a VNode tree into an HTML string.
@@ -45,6 +50,12 @@ function renderVNode(vnode, parentComponent) {
     // Component: on the server we create an instance, run setup, get the subtree
     // and serialize it recursively.
     const { instance, subTree } = createSSRComponent(vnode, parentComponent)
+    // Our renderToString is synchronous string concatenation; real Vue awaits
+    // an async setup(). If setup returned a Promise we'd silently serialize
+    // 'undefined' everywhere the state should be — fail loudly instead.
+    if (instance.setupState && typeof instance.setupState.then === 'function') {
+      throw new Error('async setup() is not supported by this renderToString')
+    }
     return renderVNode(subTree, instance)
   }
   return ''
@@ -68,13 +79,27 @@ function renderChildren(children, parentComponent) {
   return ''
 }
 
+// Attribute NAMES cannot be escaped — HTML has no escape syntax there. A name
+// containing whitespace, quotes, <, >, / or = would break out of its position
+// and inject new attributes or tags (think v-bind="objectFromUserJson"). Like
+// Vue's isSSRSafeAttrName, we simply refuse to render such names.
+const UNSAFE_ATTR_NAME = /[\s"'<>/=\x00-\x1f]/
+function isSafeAttrName(name) {
+  return !UNSAFE_ATTR_NAME.test(name)
+}
+
 // Serialize attributes. Events (onClick) are not emitted into HTML — they get
 // attached on the client during hydration. class/style/booleans are special-cased.
 function renderAttrs(props) {
   let out = ''
   for (const key in props) {
-    if (key === 'key') continue
+    // key/ref drive the virtual DOM, they are not HTML attributes.
+    if (key === 'key' || key === 'ref') continue
     if (/^on[A-Z]/.test(key)) continue // event handlers — client-only
+    if (!isSafeAttrName(key)) {
+      console.warn(`[ssr] skipped unsafe attribute name: ${JSON.stringify(key)}`)
+      continue
+    }
     const value = props[key]
     if (value == null || value === false) continue
 

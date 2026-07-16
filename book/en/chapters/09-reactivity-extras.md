@@ -21,45 +21,62 @@ const stop = watchEffect(() => {
 ```
 
 It runs the function immediately (collecting dependencies from whatever it read along
-the way), then re-runs it when those change. The implementation is literally an effect
-whose scheduler re-runs it:
+the way), then re-runs it when those change. The implementation is an effect whose
+scheduler queues a re-run in the same microtask queue `watch` uses (`flush: 'pre'`):
 
 ```js
-export function watchEffect(fn) {
-  const effect = new ReactiveEffect(fn, () => effect.run())
-  effect.run()
+export function watchEffect(fn, options = {}) {
+  // … onCleanup plumbing, same as in watch …
+  const job = () => {
+    if (!effect.active) return
+    runCleanup()
+    effect.run()
+  }
+  const scheduler = options.flush === 'sync' ? job : () => queueWatchJob(job)
+  const effect = new ReactiveEffect(() => fn(onCleanup), scheduler)
+  effect.onStop = runCleanup
+
+  effect.run() // first run: both executes and collects dependencies
   return () => effect.stop()
 }
 ```
 
 It returns a stop function — call it and the watching stops (`effect.stop` runs
-`cleanup` and marks the effect inactive, see layer 1).
+`cleanup` and marks the effect inactive, see layer 1). The function itself receives
+`onCleanup` — same contract as in `watch`: whatever you register through it runs
+before each re-run and on stop.
 
 ## readonly
 
 Sometimes you want to hand out data "view only" — for example, a `provide` value that
 descendants shouldn't mutate. `readonly(obj)` returns a Proxy where reads work
-(including nested ones — those become `readonly` too), while writes are silently
-rejected with a warning:
+(including nested ones — those become `readonly` too), while writes and deletes are
+silently rejected with a warning:
 
 ```js
+const readonlyHandlers = {
+  get: createGetter(true, false), // the shared getter factory, isReadonly flag on
+  set(obj, key) {
+    console.warn(`readonly: cannot modify property "${String(key)}"`)
+    return true // the write is "swallowed" but not performed
+  },
+  deleteProperty(obj, key) {
+    console.warn(`readonly: cannot delete property "${String(key)}"`)
+    return true
+  },
+}
+
 export function readonly(target) {
-  return new Proxy(target, {
-    get(obj, key, receiver) {
-      if (key === RAW) return obj
-      const result = Reflect.get(obj, key, receiver)
-      return isObject(result) ? readonly(result) : result // nested is readonly too
-    },
-    set(obj, key) {
-      console.warn(`readonly: cannot modify "${String(key)}"`)
-      return true // the write is "swallowed" but not performed
-    },
-  })
+  return createReactiveObject(target, readonlyHandlers, readonlyMap, true)
 }
 ```
 
-There's nothing to track here — the value never changes, so `track` in `get` isn't
-needed.
+There's nothing to track here — the value never changes through this proxy, so the
+getter (the same `createGetter` from layer 1, with the `isReadonly` flag on) skips
+`track`; nested objects come out wrapped in `readonly` too. One honest
+simplification: a Map or Set passed to `readonly` falls through to the shared
+collection handlers and gets no read-only view — writes to it are not blocked (Vue
+has such views; we keep the layer small).
 
 ## shallowReactive and shallowRef
 

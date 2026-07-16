@@ -27,13 +27,18 @@ test('$patch with an object and a function', () => {
   assert.equal(store.name, 'y')
 })
 
-test('$subscribe is called on change', () => {
+test('$subscribe is called on change', async () => {
   setActivePinia(createPinia())
   const store = useCounter()
   let calls = 0
   store.$subscribe(() => calls++)
+  // $subscribe rides on watch, whose callbacks are batched into a microtask
+  // (flush: 'pre', like Vue/Pinia) — so we await between the changes.
   store.inc()
+  await Promise.resolve()
+  assert.equal(calls, 1)
   store.$patch({ count: 100 })
+  await Promise.resolve()
   assert.equal(calls, 2)
 })
 
@@ -46,7 +51,7 @@ test('$reset restores the initial state', () => {
   assert.equal(store.name, 'x')
 })
 
-test('$patch and $subscribe on a setup store', () => {
+test('$patch and $subscribe on a setup store', async () => {
   const useCart = defineStore('cart', () => {
     const items = ref([])
     const total = computed(() => items.value.reduce((s, p) => s + p, 0))
@@ -60,17 +65,15 @@ test('$patch and $subscribe on a setup store', () => {
   cart.$patch({ items: [100, 200] })
   assert.deepEqual(cart.items, [100, 200])
   assert.equal(cart.total, 300)
+  await Promise.resolve() // let the batched watch callback fire
   assert.equal(notified, 1)
 })
 
-test('$reset on a setup store warns', () => {
+test('$reset on a setup store throws (as in Pinia)', () => {
   const useThing = defineStore('thing', () => ({ x: ref(1) }))
   setActivePinia(createPinia())
   const store = useThing()
-  const warns = []
-  const orig = console.warn
-  console.warn = (m) => warns.push(m)
-  store.$reset()
-  console.warn = orig
-  assert.equal(warns.length, 1)
+  // A setup store has no state() factory to rebuild the initial state from,
+  // so Pinia throws instead of guessing — and so do we.
+  assert.throws(() => store.$reset(), /setup syntax and does not implement \$reset/)
 })

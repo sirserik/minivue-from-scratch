@@ -11,10 +11,14 @@
 //  functions that mutate state. There is no separate "store magic".
 // ============================================================================
 
-import { reactive, computed, inject, getCurrentInstance, watch } from '../runtime-core/index.js'
-import { proxyRefs, toRef } from '../reactivity/index.js'
+import { inject, getCurrentInstance } from '../runtime-core/index.js'
+import { reactive, computed, watch, proxyRefs, toRef } from '../reactivity/index.js'
 
 // Key for inject and the "active" Pinia container (in case it's used outside setup).
+// ⚠ activePinia is a MODULE-LEVEL global — one per Node process. On a server
+// that means it is shared by every request, so relying on it during SSR leaks
+// one user's state into another user's HTML. That's why useStore() prefers
+// inject() (per-app) and only falls back to this global outside components.
 const PINIA_KEY = Symbol('pinia')
 let activePinia = null
 export function setActivePinia(pinia) {
@@ -24,6 +28,16 @@ export function setActivePinia(pinia) {
 /**
  * Create the Pinia container that holds all of the app's stores.
  * Installed as a plugin: `app.use(createPinia())`.
+ *
+ * SSR note: create a FRESH pinia for every request. Stores are cached per
+ * pinia (see _stores below), so a module-level pinia reused across requests
+ * would serve request A's mutated state to request B:
+ *
+ *   // per request:
+ *   const pinia = createPinia()
+ *   const app = createSSRApp(App).use(pinia)   // provides pinia to this app only
+ *   const html = app.renderToString()
+ *
  * @returns {object} The Pinia instance.
  */
 export function createPinia() {
@@ -39,7 +53,9 @@ export function createPinia() {
       return pinia
     },
 
-    // Install into the app.
+    // Install into the app. app.provide is the isolation mechanism: every
+    // component of THIS app can inject THIS pinia, no matter what other apps
+    // (other SSR requests) are doing in the same process.
     install(app) {
       setActivePinia(pinia)
       app.provide(PINIA_KEY, pinia)
@@ -49,7 +65,12 @@ export function createPinia() {
   return pinia
 }
 
-// Get the active container: inside setup via inject, otherwise the global one.
+// Get the active container. Inside a component setup we resolve through
+// inject — that walks the component's provides chain up to app.provide, so
+// each app (each SSR request) sees its own pinia even when several coexist.
+// Outside components (plain modules, tests) there is no chain to walk, so we
+// fall back to the process-wide activePinia — fine on the client, hazardous
+// on the server (see the note next to activePinia above).
 function getActivePinia() {
   const fromInject = getCurrentInstance() ? inject(PINIA_KEY, null) : null
   return fromInject || activePinia
@@ -110,8 +131,14 @@ function createStore(id, setupOrOptions, pinia) {
   store._parts = parts // useful for storeToRefs
 
   // $state — direct access to the reactive state (for options stores).
+  // Assignment is supported too: `store.$state = obj` behaves like $patch(obj).
+  // We must patch INTO the existing reactive object, never swap it — swapping
+  // would silently detach every effect subscribed to the old object.
   if (pinia.state[id]) {
-    Object.defineProperty(store, '$state', { get: () => pinia.state[id] })
+    Object.defineProperty(store, '$state', {
+      get: () => pinia.state[id],
+      set: (newState) => store.$patch((s) => Object.assign(s, newState)),
+    })
   }
 
   // Store utility methods: $patch / $subscribe / $reset.
@@ -132,41 +159,59 @@ function createStore(id, setupOrOptions, pinia) {
 function addStoreApi(store, id, pinia, options) {
   const stateTarget = pinia.state[id] || store // options → reactive state, setup → the store itself
 
+  // Label for the mutation-info object that $subscribe callbacks receive
+  // (like Pinia): 'direct' for plain assignments, 'patch object'/'patch
+  // function' while a $patch is being applied.
+  let mutationType = 'direct'
+
   // $patch — batched change: an object (partial merge) or a function.
   //   store.$patch({ count: 5 })
   //   store.$patch((s) => { s.count++; s.done = true })
   store.$patch = (partialOrFn) => {
+    mutationType = typeof partialOrFn === 'function' ? 'patch function' : 'patch object'
     if (typeof partialOrFn === 'function') partialOrFn(stateTarget)
     else Object.assign(stateTarget, partialOrFn)
+    // The watch jobs these mutations queued flush on the next microtask (watch
+    // batches with flush: 'pre'); this microtask is queued AFTER that flush,
+    // so subscribers see the patch label, and later mutations report 'direct'.
+    queueMicrotask(() => {
+      mutationType = 'direct'
+    })
   }
 
   // $subscribe — call the callback on any change to the store's state.
+  // Built on the deep watch of layer 1, so it batches like Vue/Pinia: any
+  // number of synchronous mutations (e.g. one $patch of three keys) collapse
+  // into ONE callback on the next microtask — not one call per assignment.
+  // The callback receives (mutation, state), where mutation = { type, storeId }.
   store.$subscribe = (callback) => {
+    const notify = () => callback({ type: mutationType, storeId: id }, stateTarget)
     if (pinia.state[id]) {
-      // options store: watch the reactive state (watch over reactive is deep).
-      return watch(pinia.state[id], () => callback(store))
+      // Options store: watching a reactive object is deep by definition —
+      // traverse subscribes to every nested property, array indices/length and
+      // key additions, so arr.push() and brand-new keys are seen too.
+      return watch(pinia.state[id], notify)
     }
-    // setup store: watch only the STATE ref fields. We exclude computed
-    // (it has an .effect) — otherwise a single state change would fire twice:
-    // once from the ref itself and once from the computed that depends on it.
-    const stateKeys = Object.keys(store._parts).filter((k) => {
-      const v = store._parts[k]
-      return v && v.__isRef && !v.effect
-    })
-    return watch(
-      () => stateKeys.map((k) => store[k]),
-      () => callback(store),
-    )
+    // Setup store: watch every STATE ref deeply ({ deep } makes traverse walk
+    // inside ref values, so items.value.push(...) is seen). We exclude computed
+    // (it has an .effect) — otherwise a single state change would fire the
+    // callback twice: once from the ref, once from the computed built on it.
+    const stateRefs = Object.keys(store._parts)
+      .map((k) => store._parts[k])
+      .filter((v) => v && v.__isRef && !v.effect)
+    return watch(stateRefs, notify, { deep: true })
   }
 
-  // $reset — restore the state to its initial value (only for options stores,
-  // where we know the state() function that produces fresh values).
+  // $reset — restore the state to its initial value. Only an options store
+  // knows its state() factory; for a setup store we throw like Pinia does
+  // (a setup store can expose its own reset action if it wants one).
   store.$reset = () => {
     if (!options || !options.state) {
-      console.warn(`$reset is only available for an options store (id: ${id})`)
-      return
+      throw new Error(
+        `Store "${id}" is built using the setup syntax and does not implement $reset().`,
+      )
     }
-    Object.assign(pinia.state[id], options.state())
+    store.$patch((s) => Object.assign(s, options.state()))
   }
 }
 

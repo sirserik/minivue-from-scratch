@@ -20,27 +20,50 @@
 
 ```js
 function renderVNode(vnode, parentComponent) {
+  vnode = normalizeVNode(vnode)
   const { type } = vnode
-  if (type === Text) return escapeHtml(vnode.children)
-  if (type === Fragment) return renderChildren(vnode.children, parentComponent)
-  if (typeof type === 'string') return renderElement(vnode, parentComponent)
-  // компонент:
-  const { instance, subTree } = createSSRComponent(vnode, parentComponent)
-  return renderVNode(subTree, instance)
+
+  if (type === Text) {
+    return escapeHtml(vnode.children)
+  }
+  if (type === Fragment) {
+    return renderChildren(vnode.children, parentComponent)
+  }
+  if (typeof type === 'string') {
+    return renderElement(vnode, parentComponent)
+  }
+  if (typeof type === 'object' || typeof type === 'function') {
+    // компонент: создаём инстанс, выполняем setup, сериализуем поддерево
+    const { instance, subTree } = createSSRComponent(vnode, parentComponent)
+    // async setup() возвращает Promise — синхронный рендерер обязан упасть громко
+    if (instance.setupState && typeof instance.setupState.then === 'function') {
+      throw new Error('async setup() is not supported by this renderToString')
+    }
+    return renderVNode(subTree, instance)
+  }
+  return ''
 }
 ```
 
 Текстовый узел становится экранированным текстом, элемент — строкой
-`<tag атрибуты>дети</tag>`, компонент — результатом своего `render`. Для компонента
-на сервере мы создаём инстанс и выполняем `setup` (`createSSRComponent`), но
-реактивный эффект не заводим: серверу не нужно ничего перерисовывать, нужен один
-снимок.
+`<tag атрибуты>дети</tag>` (void-теги вроде `<img>` или `<input>` — полный
+HTML-набор из четырнадцати штук — остаются без закрывающего тега), компонент —
+результатом своего `render`. Для компонента на сервере мы создаём инстанс и
+выполняем `setup` (`createSSRComponent`), но реактивный эффект не заводим: серверу
+не нужно ничего перерисовывать, нужен один снимок. А если `setup` вернул Promise
+(асинхронный `setup`), наш синхронный рендерер дождаться его не может — и вместо
+того, чтобы молча сериализовать `undefined` на месте состояния, громко падает с
+понятной ошибкой.
 
-Две детали важны для правильного HTML. Первая — **обработчики событий не
+Три детали важны для правильного HTML. Первая — **обработчики событий не
 сериализуются**: `onClick` в HTML не имеет смысла, обработчик навесится на клиенте.
 Вторая — **экранирование**: данные пользователя проходят через `escapeHtml`, иначе
 строка `<script>` в тексте превратилась бы в исполняемый код (XSS). Тест
-«экранирование против XSS» это проверяет.
+«экранирование против XSS» это проверяет. Третья — **имена атрибутов**: значение
+экранировать можно, имя — нет, в HTML для этого просто нет синтаксиса, поэтому имя
+с пробелами, кавычками, `<`, `>`, `/` или `=` вырвалось бы из своей позиции и
+вписало бы в разметку что-то своё. Как `isSSRSafeAttrName` во Vue, такие имена мы
+просто отказываемся рендерить.
 
 ## createSSRApp
 
@@ -84,22 +107,35 @@ res.end(page(appHtml))                           // 2. вшиваем её в HT
 довешивает то, чего в HTML нет, — прежде всего обработчики событий:
 
 ```js
-function hydrateNode(node, vnode) {
+function hydrateNode(node, vnode, container) {
   vnode = normalizeVNode(vnode)
   const { type } = vnode
-  if (type === Text) { vnode.el = node; return node.nextSibling }
+  const parent = (node && hostParentNode(node)) || container
+
+  if (type === Text) {
+    // … проверки расхождений; при нужде — разрезаем склеенный браузером текст (см. ниже)
+    vnode.el = node
+    return hostNextSibling(node)
+  }
+  // … (Fragment: вставляем невидимые якоря и гидрируем детей на месте)
   if (typeof type === 'string') {
-    vnode.el = node                             // усыновляем существующий элемент
+    // … проверка тега → при расхождении предупреждаем и рендерим поддерево на клиенте
+    vnode.el = node                              // усыновляем существующий элемент
     for (const key in vnode.props) {
       if (key !== 'key') hostPatchProp(node, key, null, vnode.props[key]) // навешиваем события
     }
-    let cur = node.firstChild
-    for (const child of vnode.children) cur = hydrateNode(cur, child)      // рекурсивно детей
-    return node.nextSibling
+    if (Array.isArray(vnode.children)) {
+      let cur = node.firstChild
+      for (let i = 0; i < vnode.children.length; i++) {
+        const child = (vnode.children[i] = normalizeVNode(vnode.children[i]))
+        cur = hydrateNode(cur, child, node)      // рекурсивно детей
+      }
+    }
+    return hostNextSibling(node)
   }
   // компонент — усыновляется «поверх» узла, с заведением реактивного эффекта
-  hydrateComponentImpl(vnode, node)
-  return node ? node.nextSibling : null
+  hydrateComponentImpl(vnode, node, parent)
+  return getNextHostNode(vnode)
 }
 ```
 
@@ -109,22 +145,40 @@ function hydrateNode(node, vnode) {
 компонент живёт как всегда: меняется состояние, работает `patch`, но уже по
 усыновлённым узлам.
 
+А когда серверный DOM и клиентский vnode расходятся по-настоящему — другой тег,
+другой текст, — гидратация не падает: `handleHydrationMismatch` предупреждает и
+откатывается на клиентский рендер этого поддерева, монтируя vnode заново на месте
+устаревшего узла (текст же просто перезаписывается — клиенту, с его живым
+состоянием, доверия больше).
+
 Тест «hydrate усыновляет DOM, навешивает события и обновляет» проверяет всё это
 строго: серверный узел кнопки и клиентский после гидратации — это один и тот же
 объект (`Object.is`), значит, узел не пересоздан; на нём появился обработчик; а клик
 меняет состояние и патчит ту же самую кнопку. Именно так после гидратации статичный
 серверный HTML становится полноценным SPA без единого лишнего пересоздания.
 
+## Грабля: браузер склеивает соседние текстовые узлы
+
+Сервер пишет `<button>Clicks: 0</button>` двумя кусками текста — статическим
+`Clicks: ` и динамическим `0`, — но HTML-парсер склеивает их в ОДИН DOM-узел, а в
+клиентском vdom по-прежнему два текстовых vnode. Наивная гидратация усыновляла
+склеенный узел под первый vnode, спрашивала `nextSibling` — и сходила с реального
+DOM: всё, что дальше, переставало совпадать. Лечение в `hydrateNode`: если текст в
+DOM *начинается* с текста vnode, `splitText` отрезает усыновлённую половину, а
+остаток оставляет следующему vnode.
+
 ## Что мы упростили
 
 Настоящий SSR во Vue сложнее в деталях: он вставляет узлы-комментарии как якоря
-фрагментов и порталов, аккуратно сверяет серверный и клиентский вывод и ругается на
-расхождения (hydration mismatch), сериализует и переносит на клиент состояние стора
-(`window.__INITIAL_STATE__`), поддерживает потоковый рендер (streaming), асинхронные
-`setup` и `Suspense`, кэширование фрагментов. Мы собрали костяк — рендер дерева в
-строку с экранированием, изоморфный сервер и гидратацию с усыновлением узлов и
-навешиванием событий, — которого достаточно, чтобы понять, как работает SSR, и
-собрать рабочий пример.
+фрагментов и порталов, сериализует и переносит на клиент состояние стора
+(`window.__INITIAL_STATE__`), поддерживает потоковый рендер (streaming),
+асинхронные `setup` и `Suspense` (наш вместо молчаливой сериализации Promise кидает
+понятную ошибку), кэширование фрагментов; его обработка расхождений тоже куда
+тоньше нашего «предупредить и перерисовать». Мы собрали костяк — рендер дерева в
+строку с экранированием, изоморфный сервер и гидратацию, которая усыновляет узлы,
+навешивает события, переживает склеенные браузером текстовые узлы и
+восстанавливается после расхождений, — которого достаточно, чтобы понять, как
+работает SSR, и собрать рабочий пример.
 
 ## Проверяем себя
 

@@ -33,6 +33,10 @@ export function createAppAPI(render) {
       _component: rootComponent,
       // config.globalProperties — where plugins (router, pinia) put $router,
       // $route, $pinia. A single object for the whole app.
+      // config.errorHandler — the app-wide error hook: assign a function
+      // (err, instance, info) => {...} and every error a component throws in
+      // setup/render/hooks/handlers that no onErrorCaptured claimed lands here
+      // instead of crashing the update loop (see runtime-core/errorHandling.js).
       config: context.config,
 
       // Install a plugin. A plugin is an object with an install(app) method or

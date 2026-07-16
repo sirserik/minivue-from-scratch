@@ -32,6 +32,8 @@ export function createRenderer(options) {
     insert: hostInsert,
     remove: hostRemove,
     patchProp: hostPatchProp,
+    nextSibling: hostNextSibling,
+    parentNode: hostParentNode,
   } = options
 
   // -------------------------------------------------------------------------
@@ -48,7 +50,11 @@ export function createRenderer(options) {
 
     // Nodes of different types can't be updated into one another (a div won't
     // become a span). Remove the old one and continue down the mount branch.
+    // The replacement must land where the OLD node stood — not at the caller's
+    // anchor (which is often "end of container") — so ask the old vnode for
+    // its right neighbor BEFORE unmounting it.
     if (n1 && n1.type !== n2.type) {
+      anchor = getNextHostNode(n1)
       unmount(n1)
       n1 = null
     }
@@ -64,31 +70,81 @@ export function createRenderer(options) {
       // Teleport (layer 11): children move to a different container.
       processTeleport(n1, n2, container, anchor)
     } else if (typeof type === 'object' || typeof type === 'function') {
-      if (n1 == null && n2.__keptAlive) {
-        // KeepAlive activation: don't mount again, return the hidden DOM instead.
-        hostInsert(n2.component.subTree.el, container, anchor)
-        n2.el = n2.component.subTree.el
-      } else {
-        // A regular component (implementation from layer 3).
-        processComponent(n1, n2, container, anchor)
-      }
+      // A component (implementation from layer 3). KeepAlive activation and
+      // deactivation are decided there too — the component layer knows about
+      // instances and lifecycle hooks, the renderer doesn't have to.
+      processComponent(n1, n2, container, anchor)
     }
+  }
+
+  // ---------------------------------------------------------------------------
+  //  Where does a vnode "end" in the real tree? For an element or text node the
+  //  answer is simply el.nextSibling. But a component's DOM is its subtree, and
+  //  a fragment spans a RANGE of nodes ending at its end anchor. This helper
+  //  answers uniformly — the diff uses it to find insertion positions.
+  // ---------------------------------------------------------------------------
+  function getNextHostNode(vnode) {
+    if (vnode.component) {
+      const sub = vnode.component.subTree
+      return sub ? getNextHostNode(sub) : null
+    }
+    const edge = vnode.anchor || vnode.el // fragments end at their anchor
+    return edge ? hostNextSibling(edge) : null
+  }
+
+  // ---------------------------------------------------------------------------
+  //  move — relocate an already-mounted vnode without unmounting it. A plain
+  //  node is one hostInsert; a component is its whole subtree; a fragment is
+  //  its full node range: start anchor, every child, end anchor.
+  // ---------------------------------------------------------------------------
+  function move(vnode, container, anchor) {
+    if (vnode.component) {
+      move(vnode.component.subTree, container, anchor)
+      return
+    }
+    if (vnode.type === Fragment) {
+      hostInsert(vnode.el, container, anchor)
+      for (const child of vnode.children) move(child, container, anchor)
+      hostInsert(vnode.anchor, container, anchor)
+      return
+    }
+    // Element, text, or a Teleport's placeholder (its children live in the
+    // target container and don't move with the host position).
+    hostInsert(vnode.el, container, anchor)
   }
 
   // --- Teleport -------------------------------------------------------------
   function processTeleport(n1, n2, container, anchor) {
-    const target = resolveTeleportTarget(n2.props)
     if (n1 == null) {
       // Put an empty anchor at the original spot (so siblings don't shift),
       // and mount the children into the target container.
       n2.el = hostCreateText('')
       hostInsert(n2.el, container, anchor)
-      n2.target = target
+      const target = (n2.target = resolveTeleportTarget(n2.props))
       if (target && Array.isArray(n2.children)) mountChildren(n2.children, target, null)
     } else {
       n2.el = n1.el
-      n2.target = n1.target
-      patchChildren(n1, n2, n1.target, null)
+      const prevTarget = n1.target
+      const nextTarget = resolveTeleportTarget(n2.props)
+      if (prevTarget) {
+        // Diff the children in the OLD target first (its anchors are stable),
+        // and only then, if `to` changed, carry every child over to the new
+        // container. Ignoring the new target here was a real bug: the computed
+        // value used to be thrown away and children stayed put forever.
+        n2.target = prevTarget
+        patchChildren(n1, n2, prevTarget, null)
+        if (nextTarget && nextTarget !== prevTarget) {
+          n2.target = nextTarget
+          for (const child of n2.children) move(child, nextTarget, null)
+        }
+      } else if (nextTarget) {
+        // The target could not be resolved at mount time but exists now —
+        // the children were never mounted, so mount them fresh.
+        n2.target = nextTarget
+        if (Array.isArray(n2.children)) mountChildren(n2.children, nextTarget, null)
+      } else {
+        n2.target = null
+      }
     }
   }
 
@@ -98,13 +154,6 @@ export function createRenderer(options) {
       return options.querySelector ? options.querySelector(to) : null
     }
     return to || null // the element itself was passed
-  }
-
-  // A lazy "storage" — an off-DOM container where deactivated KeepAlive
-  // components hide (their DOM lives there until they're shown again).
-  let _storage = null
-  function keepAliveStorage() {
-    return _storage || (_storage = hostCreateElement('div'))
   }
 
   // --- Text nodes -----------------------------------------------------------
@@ -123,12 +172,27 @@ export function createRenderer(options) {
   }
 
   // --- Fragments (a group of nodes without a parent tag) --------------------
+  //  A fragment has no element of its own, yet the diff still needs SOMETHING
+  //  to point at: "insert before the fragment", "where does the fragment end".
+  //  So we bracket its children with two invisible empty text nodes — a start
+  //  anchor (stored in vnode.el) and an end anchor (vnode.anchor), exactly like
+  //  Vue. Siblings insert before the start anchor; the fragment's own children
+  //  mount and shuffle strictly between the two.
   function processFragment(n1, n2, container, anchor) {
     if (n1 == null) {
-      mountChildren(n2.children, container, anchor)
+      const start = (n2.el = hostCreateText(''))
+      const end = (n2.anchor = hostCreateText(''))
+      hostInsert(start, container, anchor)
+      hostInsert(end, container, anchor)
+      // Children go BETWEEN the anchors — i.e. before `end`.
+      mountChildren(n2.children, container, end)
     } else {
-      // Both are fragments: diff their children directly in the same container.
-      patchChildren(n1, n2, container, anchor)
+      // Both are fragments: reuse the anchors and diff the children in place.
+      n2.el = n1.el
+      n2.anchor = n1.anchor
+      // New or moved children must land before OUR end anchor, not at the end
+      // of the shared container (other siblings may live after the fragment).
+      patchChildren(n1, n2, container, n2.anchor)
     }
   }
 
@@ -367,7 +431,9 @@ export function createRenderer(options) {
           patch(null, newChild, container, anchor)
         } else if (seqPointer < 0 || k !== increasing[seqPointer]) {
           // The node exists but isn't in the "stable" subsequence — move it.
-          hostInsert(newChild.el, container, anchor)
+          // move() (not a bare hostInsert) because the child may be a fragment
+          // or a component whose DOM is a whole range of nodes.
+          move(newChild, container, anchor)
         } else {
           // The node is at its correct relative position — no move needed.
           seqPointer--
@@ -376,36 +442,51 @@ export function createRenderer(options) {
     }
   }
 
-  function unmountChildren(children) {
-    for (const child of children) unmount(child)
+  function unmountChildren(children, doRemove = true) {
+    for (const child of children) unmount(child, doRemove)
   }
 
-  function unmount(vnode) {
+  // ---------------------------------------------------------------------------
+  //  unmount — tear a vnode down. `doRemove` says whether this vnode's own DOM
+  //  must be detached: when an ANCESTOR element is being removed wholesale, the
+  //  descendants' DOM leaves with it, so we recurse with doRemove: false — the
+  //  walk still has to happen (components must fire their unmount hooks and stop
+  //  their effects, Teleports must clean their remote targets, directives must
+  //  run), we just skip the redundant per-node hostRemove calls.
+  // ---------------------------------------------------------------------------
+  function unmount(vnode, doRemove = true) {
     if (vnode.type === Fragment) {
-      // A fragment has no node of its own — unmount its children.
-      unmountChildren(vnode.children)
+      // A fragment's children sit directly in the parent container, so each one
+      // is removed individually; the two anchors go away with them.
+      unmountChildren(vnode.children, doRemove)
+      if (doRemove) {
+        hostRemove(vnode.el)
+        hostRemove(vnode.anchor)
+      }
       return
     }
     if (vnode.type && vnode.type.__isTeleport) {
-      // Teleport: remove the children from the target container and the anchor stub.
-      unmountChildren(vnode.children)
-      hostRemove(vnode.el)
+      // Teleport children live in ANOTHER container — they never disappear with
+      // an ancestor's element, so they are always removed explicitly. If the
+      // target never resolved, the children were never mounted: nothing to do.
+      if (vnode.target) unmountChildren(vnode.children, true)
+      if (doRemove) hostRemove(vnode.el)
       return
     }
-    if (vnode.__shouldKeepAlive && vnode.component) {
-      // KeepAlive deactivation: do NOT destroy the instance, hide its DOM in the
-      // storage instead. The component's state is preserved until it's shown again.
-      hostInsert(vnode.component.subTree.el, keepAliveStorage())
-      return
-    }
-    // Give components a chance to unmount properly (layer 3 fills this in).
+    // Give components a chance to unmount properly (layer 3 fills this in;
+    // KeepAlive deactivation is decided there too).
     if (vnode.component) {
-      unmountComponent(vnode)
+      unmountComponent(vnode, doRemove)
       return
     }
-    // Directives: the hook before the element is removed from the DOM.
+    // Plain element or text node.
     invokeDirectives(vnode, 'beforeUnmount')
-    hostRemove(vnode.el)
+    if (Array.isArray(vnode.children)) {
+      // Recurse even though the children's DOM will be removed together with
+      // this element (doRemove: false) — see the note above the function.
+      unmountChildren(vnode.children, false)
+    }
+    if (doRemove) hostRemove(vnode.el)
     invokeDirectives(vnode, 'unmounted')
   }
 
@@ -432,50 +513,121 @@ export function createRenderer(options) {
   //  changes go through patch over the already-adopted tree.
   // -------------------------------------------------------------------------
   function hydrate(vnode, container) {
-    hydrateNode(container.firstChild, vnode)
+    hydrateNode(container.firstChild, vnode, container)
     container._vnode = vnode
+  }
+
+  // Server DOM and client vnodes disagree (a tag changed between the server
+  // render and now, markup was tampered with, ...). We can't adopt the node —
+  // warn and fall back to a CLIENT-side render of this subtree: mount the vnode
+  // fresh in place of the stale node and drop the stale node.
+  function handleHydrationMismatch(node, vnode, container) {
+    console.warn(
+      '[minivue] Hydration mismatch: server-rendered DOM does not match the client vnode tree.',
+      node,
+      vnode.type,
+    )
+    const next = node ? hostNextSibling(node) : null
+    patch(null, vnode, container, node)
+    if (node) hostRemove(node)
+    return next
   }
 
   // Hydrate a single node: match the DOM node `node` with `vnode`. Returns the
   // next DOM node (the right sibling) — so we can walk the children in order.
-  function hydrateNode(node, vnode) {
+  // `container` is the parent host node — needed when `node` is null (nothing
+  // left to adopt) or when anchors must be inserted.
+  function hydrateNode(node, vnode, container) {
     vnode = normalizeVNode(vnode)
     const { type } = vnode
+    const parent = (node && hostParentNode(node)) || container
 
     if (type === Text) {
+      const text = vnode.children
+      if (text === '') {
+        // An empty text vnode (a v-if that rendered nothing) produces NO output
+        // on the server — there is no DOM node to claim. Create the empty node
+        // so later patches have an el to work with, and leave `node` for the
+        // next sibling vnode.
+        const el = (vnode.el = hostCreateText(''))
+        hostInsert(el, parent, node)
+        return node
+      }
+      if (!node || node.nodeType !== 3) {
+        return handleHydrationMismatch(node, vnode, parent)
+      }
+      if (node.nodeValue !== text) {
+        // The HTML parser merges adjacent text: <button>Clicks: {{ n }}</button>
+        // arrives as ONE DOM text node, while the client vdom has TWO text
+        // vnodes. If the DOM text starts with ours, split the DOM node and
+        // adopt the first half; the remainder stays for the next vnode.
+        if (node.nodeValue.startsWith(text) && typeof node.splitText === 'function') {
+          const rest = node.splitText(text.length)
+          vnode.el = node
+          return rest
+        }
+        // Genuinely different text: warn, but trust the client (it has the
+        // live state) and overwrite.
+        console.warn(
+          `[minivue] Hydration text mismatch: server "${node.nodeValue}" vs client "${text}"`,
+        )
+        hostSetText(node, text)
+      }
       vnode.el = node
-      return node ? node.nextSibling : null
+      return hostNextSibling(node)
     }
 
     if (type === Fragment) {
+      // Fragments need their start/end anchors even when hydrating (the server
+      // HTML carries no markers), so create the invisible anchors in place.
+      const start = (vnode.el = hostCreateText(''))
+      hostInsert(start, parent, node)
       let cur = node
-      for (const child of vnode.children) cur = hydrateNode(cur, child)
+      for (let i = 0; i < vnode.children.length; i++) {
+        const child = (vnode.children[i] = normalizeVNode(vnode.children[i]))
+        cur = hydrateNode(cur, child, parent)
+      }
+      const end = (vnode.anchor = hostCreateText(''))
+      hostInsert(end, parent, cur)
       return cur
     }
 
     if (typeof type === 'string') {
+      // Mismatch check: the node must be an element with the same tag. The
+      // browser DOM exposes tagName (uppercase); the test shim exposes tag.
+      const domTag =
+        node && node.nodeType === 1 ? String(node.tagName || node.tag || '').toLowerCase() : null
+      if (domTag !== type.toLowerCase()) {
+        return handleHydrationMismatch(node, vnode, parent)
+      }
       // Element: link the node and attach props. Static attributes are already in
       // the HTML (setAttribute is idempotent), but events are added here.
       vnode.el = node
       for (const key in vnode.props) {
         if (key !== 'key') hostPatchProp(node, key, null, vnode.props[key])
       }
-      // Hydrate the children via childNodes.
+      // Hydrate the children via childNodes. Normalize them IN PLACE (like
+      // mountChildren does) — later patches diff against these very arrays.
       if (Array.isArray(vnode.children)) {
         let cur = node.firstChild
-        for (const child of vnode.children) cur = hydrateNode(cur, child)
+        for (let i = 0; i < vnode.children.length; i++) {
+          const child = (vnode.children[i] = normalizeVNode(vnode.children[i]))
+          cur = hydrateNode(cur, child, node)
+        }
       }
-      return node.nextSibling
+      return hostNextSibling(node)
     }
 
     if (typeof type === 'object' || typeof type === 'function') {
       // Component: hand it to the component system, which mounts "over" the
-      // existing node and sets up a reactive effect for future updates.
-      hydrateComponentImpl(vnode, node)
-      return node ? node.nextSibling : null
+      // existing node and sets up a reactive effect for future updates. The
+      // subtree may span several DOM nodes (fragment root), so ask the vnode
+      // where it ends instead of trusting node.nextSibling.
+      hydrateComponentImpl(vnode, node, parent)
+      return getNextHostNode(vnode)
     }
 
-    return node ? node.nextSibling : null
+    return node ? hostNextSibling(node) : null
   }
 
   // -- Stubs for components. Their bodies are supplied by layer 3 via
@@ -483,16 +635,28 @@ export function createRenderer(options) {
   let processComponent = () => {
     throw new Error('Components appear in layer 3 (runtime-core/component.js)')
   }
-  let unmountComponent = (vnode) => hostRemove(vnode.el)
+  let unmountComponent = (vnode, doRemove = true) => {
+    if (doRemove) hostRemove(vnode.el)
+  }
   let hydrateComponentImpl = () => {
     throw new Error('Component hydration is not wired up')
   }
 
   // Let the component layer "inject" its own implementation without rewriting the
   // whole renderer. We hand back the internal functions components need (including
-  // hydrateNode — needed to hydrate a component's subtree).
+  // hydrateNode — needed to hydrate a component's subtree — and move/
+  // getNextHostNode, which KeepAlive uses to stash and restore live DOM).
   function __installComponents(install) {
-    const api = install({ patch, unmount, render, options, mountChildren, hydrateNode })
+    const api = install({
+      patch,
+      unmount,
+      render,
+      options,
+      mountChildren,
+      hydrateNode,
+      move,
+      getNextHostNode,
+    })
     processComponent = api.processComponent
     unmountComponent = api.unmountComponent
     if (api.hydrateComponent) hydrateComponentImpl = api.hydrateComponent

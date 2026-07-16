@@ -3,10 +3,11 @@
 Vue ships a few "system" components that don't behave like ordinary ones:
 `Teleport` renders its children somewhere else on the page, `KeepAlive` keeps
 inactive components alive, and `defineAsyncComponent` loads code on demand. They're
-special — the renderer recognizes them by markers and handles them differently.
+special — the renderer and the component system recognize them by markers and handle
+them differently.
 
-Chapter code: `packages/runtime-core/builtins.js` plus changes in `renderer.js`. Tests
-— `test/builtins.test.mjs`, demo — `playground/11-builtins.html`.
+Chapter code: `packages/runtime-core/builtins.js` plus changes in `renderer.js` and
+`component.js`. Tests — `test/builtins.test.mjs`, demo — `playground/11-builtins.html`.
 
 ## Teleport: render somewhere else
 
@@ -27,13 +28,24 @@ container instead of the current one:
 
 ```js
 function processTeleport(n1, n2, container, anchor) {
-  const target = resolveTeleportTarget(n2.props) // element or querySelector(to)
   if (n1 == null) {
-    n2.el = hostCreateText('')          // empty anchor at the original spot
+    n2.el = hostCreateText('')           // empty anchor at the original spot
     hostInsert(n2.el, container, anchor)
-    mountChildren(n2.children, target, null) // children go to target
+    const target = (n2.target = resolveTeleportTarget(n2.props))
+    if (target && Array.isArray(n2.children)) mountChildren(n2.children, target, null)
   } else {
-    patchChildren(n1, n2, n1.target, null)   // updates go to target too
+    n2.el = n1.el
+    const prevTarget = n1.target
+    const nextTarget = resolveTeleportTarget(n2.props)
+    if (prevTarget) {
+      n2.target = prevTarget
+      patchChildren(n1, n2, prevTarget, null) // diff in the OLD target first
+      if (nextTarget && nextTarget !== prevTarget) {
+        n2.target = nextTarget
+        for (const child of n2.children) move(child, nextTarget, null) // `to` changed
+      }
+    }
+    // … target appeared only now → mount the children fresh
   }
 }
 ```
@@ -41,7 +53,10 @@ function processTeleport(n1, n2, container, anchor) {
 An empty text anchor stays at the original spot so sibling nodes don't get thrown off,
 while the content lives in the target container. The "children render in the target
 container" test checks exactly this: the original spot is empty, all the content is in
-the target.
+the target. On update the children are diffed in the *old* target (its anchors are
+stable), and only then, if `to` changed, carried over into the new container —
+ignoring the freshly resolved target here was a real bug: the computed value used to
+be thrown away and the children stayed put forever.
 
 ## KeepAlive: hide, don't destroy
 
@@ -55,36 +70,44 @@ and state.
 ```
 
 The implementation is a combination of "markers on the vnode + special handling in the
-renderer." `KeepAlive` itself keeps a cache of "key → vnode with a live instance" and
-sets two markers:
+component system." `KeepAlive` itself keeps a cache of "key → vnode with a live
+instance" and sets the markers:
 
 ```js
 if (cache.has(key)) {
   vnode.component = cache.get(key).component // reuse the live instance
-  vnode.__keptAlive = true                    // renderer will "revive", not mount
-} else {
-  cache.set(key, vnode)
+  vnode.__keptAlive = true // the component system "reactivates" instead of remounting
 }
-vnode.__shouldKeepAlive = true                // on leave — hide, don't destroy
+cache.set(key, vnode) // always store the FRESH vnode — it carries the latest props
+vnode.__shouldKeepAlive = true  // on leave — stash, don't destroy
+vnode.__keepAliveOwner = instance
 ```
 
-The renderer reacts to the markers in two places. On unmount, instead of removing the
-component, it hides its DOM in off-DOM storage without touching the instance:
+The component system (`component.js`) reacts to the markers in two places. On unmount,
+instead of destroying the component, `unmountComponent` moves its DOM into off-screen
+storage without touching the instance — and fires `onDeactivated`:
 
 ```js
-if (vnode.__shouldKeepAlive) {
-  hostInsert(vnode.component.subTree.el, keepAliveStorage()) // hidden away
+if (vnode.__shouldKeepAlive && owner && !owner.__keepAliveTearingDown) {
+  move(instance.subTree, keepAliveStorage(), null) // stashed away
+  instance.isDeactivated = true
+  invokeHooks(instance.da, instance, 'deactivated hook') // onDeactivated
   return
 }
 ```
 
-And when "mounting" a cached component, it doesn't create it anew — it brings the
-hidden DOM back:
+And when "mounting" a cached component, `activateComponent` doesn't create it anew —
+it brings the stashed DOM back, then runs a normal update against the new vnode (its
+props and slots may have changed while the component slept) and fires `onActivated`:
 
 ```js
-if (n1 == null && n2.__keptAlive) {
-  hostInsert(n2.component.subTree.el, container, anchor) // pulled from storage
-  n2.el = n2.component.subTree.el
+function activateComponent(vnode, container, anchor) {
+  const instance = vnode.component // set by KeepAlive's render from its cache
+  move(instance.subTree, container, anchor)
+  updateComponent(instance.vnode, vnode)
+  vnode.el = instance.subTree.el
+  instance.isDeactivated = false
+  invokeHooks(instance.a, instance, 'activated hook') // onActivated
 }
 ```
 
@@ -92,6 +115,12 @@ The instance stays alive the whole time, its reactive effect is never stopped �
 is why the state is right where you left it. The "state is preserved across switching"
 test proves it: a counter incremented on tab A stays put after moving to B and back,
 instead of resetting.
+
+The `__keepAliveOwner` marker matters at the very end. When the `KeepAlive` itself is
+unmounted for real, `unmountComponent` flags it as tearing down: its children are no
+longer stashed, and everything still hiding in the cache gets a genuine unmount —
+hooks fire, effects stop, the storage DOM is freed. Without an owner, "unmount" would
+keep stashing forever and leak every cached component for the life of the page.
 
 ### A slots bug found along the way
 
@@ -114,25 +143,40 @@ const Chart = defineAsyncComponent(() => import('./Chart.js'))
 ```
 
 The implementation is, again, just reactivity. The wrapper's `setup` kicks off the
-loader and holds a state `ref`; when the promise resolves, the `ref` flips — and the
+loader and holds state `ref`s; when the promise resolves, a `ref` flips — and the
 wrapper re-renders with the real component:
 
 ```js
 setup() {
+  const instance = getCurrentInstance()
   const loaded = ref(false)
-  options.loader().then((mod) => {
-    resolvedComponent = mod.default || mod
-    loaded.value = true // flipping the ref → re-render the wrapper
-  })
-  return () =>
-    loaded.value && resolvedComponent
-      ? h(resolvedComponent)
-      : h('span', 'Loading…')
+  const error = ref(null)
+
+  load() // one shared in-flight request for every instance of the wrapper
+    .then(() => {
+      if (!instance || !instance.isUnmounted) loaded.value = true
+    })
+    .catch((err) => {
+      if (!instance || !instance.isUnmounted) error.value = err
+    })
+
+  return () => {
+    if (loaded.value && resolvedComponent) return h(resolvedComponent)
+    if (error.value) {
+      return options.errorComponent ? h(options.errorComponent) : h('span', 'Loading failed')
+    }
+    return options.loadingComponent ? h(options.loadingComponent) : h('span', 'Loading…')
+  }
 }
 ```
 
-No special machinery — reactivity switches the view on its own. The tests cover both
-outcomes: a successful load and an error (in which case `errorComponent` is shown).
+No special machinery — reactivity switches the view on its own. Two guards are worth
+noting: `load()` caches a single in-flight promise, so ten async components in a list
+trigger one fetch, not ten (a failed load clears the slot to allow a retry); and the
+`isUnmounted` checks keep a wrapper that was removed before the chunk arrived from
+flipping state and mounting the late component into a container that's already gone.
+The tests cover both outcomes: a successful load and an error (in which case
+`errorComponent` is shown).
 
 ## What we simplified
 
@@ -140,8 +184,10 @@ We left out `Suspense` — the coordinator for several async dependencies with a
 fallback and async `setup`. It hooks into deeper promise handling inside the render and
 would deserve a whole chapter of its own; for teaching purposes `defineAsyncComponent`
 is enough to show the essence of "loading → ready." Also, in real Vue `KeepAlive`
-supports `include`/`exclude`, a cache limit (`max`), and the `activated`/`deactivated`
-hooks, while `Teleport` has `disabled`. We took the core of each.
+supports `include`/`exclude` and a cache limit (`max`), while `Teleport` has
+`disabled`. We took the core of each — though the `activated`/`deactivated` hooks did
+make it in: `onActivated`/`onDeactivated` fire exactly where the stash-and-restore
+happens.
 
 ## Check yourself
 

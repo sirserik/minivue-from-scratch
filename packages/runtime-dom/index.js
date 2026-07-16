@@ -33,11 +33,15 @@ export const hydrate = renderer.hydrate // hydrate server-rendered HTML (layer 7
 export const createApp = createAppAPI(renderer.render)
 
 // Re-export the entire user-facing API from the core — one import for all of it.
+// createRenderer is exposed too, for building custom renderers (canvas, test
+// hosts...) exactly like Vue does.
 export {
   h,
   createVNode,
   Text,
   Fragment,
+  createRenderer,
+  defineComponent,
   nextTick,
   getCurrentInstance,
   onBeforeMount,
@@ -46,6 +50,9 @@ export {
   onUpdated,
   onBeforeUnmount,
   onUnmounted,
+  onActivated,
+  onDeactivated,
+  onErrorCaptured,
   provide,
   inject,
   Teleport,
@@ -67,5 +74,8 @@ export {
   shallowReactive,
   readonly,
   isReadonly,
+  isReactive,
+  isProxy,
+  toRaw,
   markRaw,
 } from '../runtime-core/index.js'

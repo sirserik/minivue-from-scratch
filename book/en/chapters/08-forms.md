@@ -56,17 +56,28 @@ field type, because fields differ:
 
 - text `input` and `textarea` → `:value` + `@input`;
 - `checkbox` → `:checked` + `@change` (and we read `$event.target.checked`);
+- `radio` → `:checked` + `@change`, where "checked" means "the model equals *this*
+  input's own value" — writing `:value` here, like the text codegen does, would
+  clobber the value that identifies the button;
 - `select` → `:value` + `@change`.
 
 ```js
-directives.binds.push({ arg: prop, exp })                       // :value="name"
-directives.ons.push({ event, exp: `${exp} = $event.target.${field}` }) // @input="name = ..."
+// The value from the event, honoring the .trim / .number modifiers.
+// Both may be present at once: trim first, then convert (like Vue).
+let valueExpr = `$event.target.${field}`
+if (mods.includes('trim')) valueExpr = `${valueExpr}.trim()`
+if (mods.includes('number')) valueExpr = `Number(${valueExpr})`
+
+directives.binds.push({ arg: prop, exp })
+directives.ons.push({ event, exp: `${exp} = ${valueExpr}`, modifiers: [] })
 ```
 
-From there it goes down the normal props-generation path — no special node. Models
-support modifiers too: `.number` wraps the value in `Number(...)`, `.trim` in
-`.trim()`. The "input updates state" test checks both sides: that state shows up in
-the field, and that input changes it.
+From there it goes down the normal props-generation path — no special node. The
+modifiers are visible right in the excerpt: `.trim` and `.number` transform the
+value read from the event, and `.lazy` (just above this excerpt) swaps the event
+for `change` — sync on blur/Enter instead of every keystroke. The "input updates
+state" test checks both sides: that state shows up in the field, and that input
+changes it.
 
 A subtlety on the runtime side: for `value` and `checked`, `patchProp` writes to
 the element property (`el.value`, `el.checked`), not the attribute. The attribute
@@ -90,16 +101,27 @@ The compiler parses `@submit.prevent` into an event plus a list of modifiers
 
 ```js
 function genHandler(on) {
-  if (on.modifiers.length === 0) {
-    // no modifiers — same as before: method reference or inline expression
+  const exp = on.exp
+  // Listener options (.once/.capture/.passive) live in the prop name, not in
+  // the handler body — ignore them here.
+  const mods = (on.modifiers || []).filter((m) => !OPTION_MODS.includes(m))
+  const isMethodPath = /^[A-Za-z_$][\w$.]*$/.test(exp.trim())
+
+  // No modifiers — same as before (short code, backwards compatible).
+  if (mods.length === 0) {
     return isMethodPath ? `(${exp})` : `$event => (${exp})`
   }
+
+  // With modifiers — wrap in an arrow function with the checks.
   const guards = []
+  const keyMods = mods.filter((m) => KEY_MODS.includes(m))
   if (keyMods.length) guards.push(`if(!_key($event,${JSON.stringify(keyMods)}))return;`)
   if (mods.includes('stop')) guards.push('$event.stopPropagation();')
   if (mods.includes('prevent')) guards.push('$event.preventDefault();')
   if (mods.includes('self')) guards.push('if($event.target!==$event.currentTarget)return;')
-  return `$event => { ${guards.join('')} ${isMethodPath ? `${exp}($event)` : `(${exp})`} }`
+
+  const call = isMethodPath ? `${exp}($event)` : `(${exp})`
+  return `$event => { ${guards.join('')} ${call} }`
 }
 ```
 
@@ -108,19 +130,29 @@ helper, which maps a modifier name to an `event.key` value (`enter` → `'Enter'
 The tests check both the generated code and the behavior: `@click.prevent` really
 does call `preventDefault`, and `@keyup.enter` fires only on Enter.
 
+Three modifiers stand apart. `.once`, `.capture` and `.passive` are not checks
+inside the handler — they are options of `addEventListener` itself. The compiler
+encodes them as suffixes on the prop name (`@click.once` → `onClickOnce`, see
+`genProps`), and on the DOM side `patchProp` peels the suffixes back off into
+listener options. That is why `genHandler` filters them out (`OPTION_MODS`) before
+building its guards.
+
 The "no modifiers" path stays as it was — a short reference `(inc)` or
 `$event => (count++)`. That way the old code and tests from layer 4 keep working
 unchanged, and the wrapper appears only where there actually are modifiers.
 
 ## What we simplified
 
-Real Vue supports more: `v-model` on components (with `modelValue` and
-`update:modelValue`), multiple models on one component, `.lazy`, `v-model` on
-`radio` and multiple `select`, system key modifiers (`.ctrl`, `.shift`), `.once`,
-`.capture`, `.passive`. We took the most common cases — text fields, checkbox and
-select, object/array `class`/`style`, `.stop`/`.prevent`/`.self`, and keys. That's
-enough to build a full-fledged form, and the principle behind the rest is exactly
-the same.
+Real Vue supports more: multiple models on one component (`v-model:title` — a model
+with an argument), `v-model` on a multiple `select`, a dynamic `:type` (it needs a
+runtime directive — our compiler picks the field type only from a static `type`),
+system key modifiers (`.ctrl`, `.shift`, `.exact`) and mouse buttons. We took the
+most common cases — text fields, checkbox, radio and select, object/array
+`class`/`style`, `.stop`/`.prevent`/`.self` and keys, the value modifiers
+`.lazy`/`.trim`/`.number`, and the listener options `.once`/`.capture`/`.passive`.
+That's enough to build a full-fledged form, and the principle behind the rest is
+exactly the same. `v-model` on your own components arrives in the directives
+chapter.
 
 ## Check yourself
 

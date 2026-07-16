@@ -5,10 +5,24 @@
 //  names match: ref, reactive, computed, watch, effect, etc.
 // ============================================================================
 
-export { effect, stop, ReactiveEffect, track, trigger } from './effect.js'
+export {
+  effect,
+  stop,
+  ReactiveEffect,
+  track,
+  trigger,
+  pauseTracking,
+  resetTracking,
+  ITERATE_KEY,
+  EffectScope,
+  effectScope,
+  getCurrentScope,
+  recordEffectScope,
+} from './effect.js'
 export {
   reactive,
   isReactive,
+  isProxy,
   toRaw,
   isObject,
   markRaw,

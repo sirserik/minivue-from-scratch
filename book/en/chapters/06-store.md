@@ -28,14 +28,20 @@ reactive state, and a list of plugins:
 ```js
 export function createPinia() {
   const pinia = {
-    _stores: new Map(),      // id → ready store (created lazily, once)
-    _plugins: [],
-    state: reactive({}),      // state[id] = state of store id
+    _stores: new Map(), // id → ready store (created once, lazily)
+    _plugins: [], // extensions (see use below)
+    state: reactive({}), // shared state: state[id] = state of store id
+
+    use(plugin) {
+      pinia._plugins.push(plugin)
+      return pinia
+    },
+
     install(app) {
       setActivePinia(pinia)
       app.provide(PINIA_KEY, pinia)
+      app.config.globalProperties.$pinia = pinia
     },
-    use(plugin) { pinia._plugins.push(plugin); return pinia },
   }
   return pinia
 }
@@ -77,7 +83,10 @@ The store is a singleton per application:
 ```js
 function useStore() {
   const pinia = getActivePinia()
-  if (!pinia._stores.has(id)) createStore(id, setupOrOptions, pinia)
+  // …
+  if (!pinia._stores.has(id)) {
+    createStore(id, setupOrOptions, pinia)
+  }
   return pinia._stores.get(id)
 }
 ```
@@ -151,12 +160,16 @@ store. That's how cross-cutting features are built: persisting a store to
 
 ## What we simplified
 
-Real Pinia does more: `$patch` for batched changes, `$subscribe` on state
-changes and `$onAction` on actions, `$reset`, hot module replacement during
-development, devtools integration, and type safety through TypeScript. We took
-the essence — reactive singleton state, getters on `computed`, actions, both
-declaration styles, `storeToRefs`, and plugins. That's enough to grasp the idea
-and share state between any components.
+Real Pinia does more: `$onAction` to intercept actions, hot module replacement
+during development, devtools integration, and type safety through TypeScript.
+The service methods, though, are all here: `$patch` applies a batched change (an
+object or a function), `$subscribe` fires one batched callback per change with
+mutation info (`{ type, storeId }`), `$state` of an options store can be read
+and even assigned — the assignment patches into the existing reactive object
+instead of replacing it, and `$reset` restores an options store to its initial
+state (a setup store throws, exactly like Pinia). We took the essence — reactive singleton state,
+getters on `computed`, actions, both declaration styles, `storeToRefs`, and
+plugins. That's enough to grasp the idea and share state between any components.
 
 ## Check yourself
 

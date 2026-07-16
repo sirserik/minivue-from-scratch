@@ -33,8 +33,8 @@ and wraps the element in a `_wd` (withDirectives) call, passing a tuple of
 "directive, value, argument, modifiers" for each directive:
 
 ```js
-// <div v-focus> compiles to:
-_wd(h("div", null, [...]), [[_dir("focus"), void 0, void 0, {}]])
+// <div v-focus></div> compiles to:
+_wd(h("div", null, null), [[_dir("focus"), void 0, void 0, {}]])
 ```
 
 `_dir` (`resolveDirective`) finds the directive by name — first in the component's local
@@ -47,8 +47,10 @@ and before removal — `beforeUnmount` and `unmounted`:
 
 ```js
 function invokeDirectives(vnode, name) {
-  for (const binding of vnode.dirs || []) {
-    const hook = binding.dir[name]
+  const dirs = vnode.dirs
+  if (!dirs) return
+  for (const binding of dirs) {
+    const hook = binding.dir && binding.dir[name]
     if (hook) hook(vnode.el, binding, vnode)
   }
 }

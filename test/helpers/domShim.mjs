@@ -55,6 +55,18 @@ class SNode {
       this.childNodes.push(tn)
     }
   }
+  // Like DOM Text.splitText(offset): keep the first `offset` characters in this
+  // node, move the rest into a NEW text node inserted right after it, return
+  // the new node. Hydration uses it to un-merge server text that covers several
+  // text vnodes (see hydrateNode in runtime-core/renderer.js).
+  splitText(offset) {
+    if (this.nodeType !== 3) throw new Error('splitText on a non-text node')
+    const rest = new SNode(3)
+    rest.nodeValue = this.nodeValue.slice(offset)
+    this.nodeValue = this.nodeValue.slice(0, offset)
+    if (this.parentNode) this.parentNode.insertBefore(rest, this.nextSibling)
+    return rest
+  }
 }
 
 function el(tag) {
@@ -101,13 +113,24 @@ export function createRoot() {
 // came from the server). Hydration will attach the events afterwards.
 export function buildServerDom(container, vnode, normalizeVNode) {
   build(vnode, container)
+  // A real HTML parser merges adjacent text into ONE node: 'Clicks: ' and '0'
+  // arrive from the server as a single "Clicks: 0" text node (and '' produces
+  // no node at all). The shim must do the same — creating a node per text
+  // vnode would hide exactly the hydration bug browsers expose.
+  function appendText(parent, value) {
+    const str = String(value)
+    if (str === '') return
+    const last = parent.childNodes[parent.childNodes.length - 1]
+    if (last && last.nodeType === 3) last.nodeValue += str
+    else parent.appendChild(text(str))
+  }
   function build(vnode, parent) {
     vnode = normalizeVNode(vnode)
     const { type } = vnode
     if (typeof type === 'symbol') {
       // Text/Fragment
       if (Array.isArray(vnode.children)) vnode.children.forEach((c) => build(c, parent))
-      else parent.appendChild(text(vnode.children))
+      else appendText(parent, vnode.children)
       return
     }
     const node = el(type)

@@ -7,8 +7,8 @@ markup, and the effect were floating free. A component packages exactly this bun
 into a self-contained, reusable unit.
 
 Chapter code: `packages/runtime-core/component.js`, `scheduler.js`, `apiLifecycle.js`,
-`apiInject.js`, `apiCreateApp.js`. Tests — `test/component.test.mjs`, demo —
-`playground/03-components.html`.
+`apiInject.js`, `apiCreateApp.js`, `errorHandling.js`. Tests — `test/component.test.mjs`,
+demo — `playground/03-components.html`.
 
 ## What a component is
 
@@ -39,8 +39,9 @@ The same `Counter` can be placed on a page ten times, and each one has its own c
 So every occurrence needs its own state. That state lives in an **instance** — an
 object created for each appearance of the component (`createComponentInstance`). It
 holds everything: parsed `props`, `slots`, the result of `setup` (`setupState`), the
-last rendered tree (`subTree`), the `isMounted` flag, the `update` function, and a
-reference to the parent.
+last rendered tree (`subTree`), the `isMounted`/`isUnmounted` flags, the effect scope
+(`scope`) that collects everything reactive the component creates, the `update`
+function, and a reference to the parent.
 
 ## setup and the public context
 
@@ -48,13 +49,27 @@ reference to the parent.
 `slots`, and runs `setup`.
 
 ```js
-const setupResult = setup(instance.props, setupContext)
+let setupResult
+try {
+  setupResult = instance.scope.run(() => setup(instance.props, setupContext))
+} catch (err) {
+  handleError(err, instance, 'setup function') // user code may throw
+} finally {
+  setCurrentInstance(null) // always clear the current instance, even on a throw
+}
+
 if (typeof setupResult === 'function') {
   instance.render = setupResult          // setup returned the render function itself
 } else if (setupResult && typeof setupResult === 'object') {
   instance.setupState = proxyRefs(setupResult) // the state object
 }
 ```
+
+Two details here. `setup` runs inside the instance's *effect scope*: every watcher
+and computed created in it lands in `instance.scope`, and unmount will stop them
+all with one call. And since `setup` is user code, a throw doesn't take the mount
+down — `handleError` routes it up the `onErrorCaptured` chain to
+`app.config.errorHandler` (see `errorHandling.js` and the lifecycle section below).
 
 Note `proxyRefs` from layer 1. It wraps the returned object so that `.value` on refs is
 unwrapped automatically. That's why in `render` you write `ctx.count`, not
@@ -78,20 +93,34 @@ state changes? Wrap its rendering in a reactive effect from layer 1.
 
 ```js
 const componentUpdateFn = () => {
+  if (instance.isUnmounted) return // a stale queued job must not touch a dead component
+  // …
   if (!instance.isMounted) {
     const subTree = (instance.subTree = renderComponentRoot(instance))
     patch(null, subTree, container, anchor) // first time — mount
+    instance.vnode.el = subTree.el
     instance.isMounted = true
+    pendingPostHooks = instance.m // onMounted — fires later, see below
   } else {
+    // …
     const nextTree = renderComponentRoot(instance)
     const prevTree = instance.subTree
     instance.subTree = nextTree
     patch(prevTree, nextTree, container, anchor) // after that — diff against the old tree
+    instance.vnode.el = nextTree.el
+    pendingPostHooks = instance.u // onUpdated
   }
 }
-const effect = new ReactiveEffect(componentUpdateFn, () => queueJob(instance.update))
-instance.update = effect.run.bind(effect)
-instance.update() // running it = mounting
+const effect = instance.scope.run(
+  () => new ReactiveEffect(componentUpdateFn, () => queueJob(instance.update)),
+)
+const update = (instance.update = () => {
+  effect.run()
+  // … the pending onMounted/onUpdated hooks fire here, outside the effect
+})
+update.id = instance.uid
+update.i = instance
+update() // first run = mount
 ```
 
 When `componentUpdateFn` runs `render` for the first time, `render` reads reactive
@@ -104,6 +133,16 @@ compare the new tree against the old one (`patch(prevTree, nextTree, ...)`), and
 diff from layer 2 makes the minimal change. So reactivity answers "when to re-render,"
 and the renderer answers "how to re-render cheaply."
 
+Three details are worth pausing on. The `isUnmounted` guard is the last line of
+defense: an update queued in the same tick the parent removed the component must not
+touch the DOM. The effect is created inside `instance.scope`, so unmounting stops it
+together with every watcher from `setup` in one call. And `onMounted`/`onUpdated`
+fire *after* `effect.run()` returns — inside the effect, reactivity's self-trigger
+guard would silently swallow any state change a hook makes, and a hook that mutates
+state could never schedule its follow-up render. The `id` on the job lets the
+scheduler keep parent-before-child order; `.i` tells it whose job this is, for error
+routing.
+
 ## The scheduler: three changes — one re-render
 
 If a handler changes three reactive values in a row, a naive effect would re-render the
@@ -112,46 +151,90 @@ why component updates go through a queue (`scheduler.js`).
 
 ```js
 export function queueJob(job) {
-  if (!queue.includes(job)) {   // a component appears in the queue at most once
-    queue.push(job)
+  // dedupe — but only against the part of the queue that hasn't run yet
+  if (!queue.includes(job, isFlushing ? flushIndex + 1 : 0)) {
+    if (!isFlushing) {
+      queue.push(job)
+    } else {
+      // … a job arriving mid-flush is inserted by id right after the running one
+    }
     queueFlush()
   }
 }
 function queueFlush() {
-  if (isFlushing) return
-  isFlushing = true
-  resolvedPromise.then(flushJobs) // process the queue at the end of the current tick
+  if (!isFlushPending && !isFlushing) {
+    isFlushPending = true
+    currentFlushPromise = resolvedPromise.then(flushJobs)
+  }
 }
 ```
 
 `resolvedPromise.then(...)` defers processing the queue to a microtask — it runs as
 soon as the current synchronous code finishes. By that point all changes have already
 happened, and the component is in the queue once — so, one re-render. That's "batching."
-The test "several changes in a row = one re-render" confirms it.
+The test "several changes in a row = one re-render" confirms it. `flushJobs` sorts the
+queue by ascending job id (a parent has a smaller id than its child, so it updates
+first and may remove the child before the child's turn) and runs each job in its own
+try/catch: one component throwing in render doesn't cancel every other update in the
+tick — the error goes to the `onErrorCaptured` chain from `errorHandling.js`.
 
 `nextTick` comes from the same place. Since the DOM update is deferred, sometimes you
 need to wait for it — for example, to measure the already-updated element. `await
 nextTick()` returns control after the queue has been processed and the DOM is current.
 
+### A gotcha: a job that re-queues itself
+
+The first version deduplicated with a plain `queue.includes(job)`. Fair enough — until
+a job re-queues *itself* mid-flush: `onUpdated` changes state, the effect triggers,
+`queueJob` finds the currently running job still sitting in the array and silently
+drops the follow-up update forever. That's why the dedupe now searches only the part
+of the queue that hasn't run yet — `includes(job, flushIndex + 1)`: the running job
+may re-enter, and a job arriving mid-flush is inserted in id order so parents still
+update before children.
+
 ## props: data flowing top-down
 
 The parent passes data to a component through its VNode's attributes: `h(Child, { label:
-'hello' })`. The component declares which of those are its `props` with a list, `props:
-['label']`. Everything declared lands in `instance.props`; everything else (for example,
-a `class` attached from outside) goes into `attrs`.
+'hello' })`. The component declares which of those are its `props` — either with a list,
+`props: ['label']`, or with an object of per-prop options: `props: { step: { type:
+Number, default: 1, required: false } }` (a bare constructor, `step: Number`, is
+shorthand for `{ type }`). Everything declared lands in `instance.props`; everything
+else (for example, a `class` attached from outside) goes into `attrs`.
 
 ```js
 for (const key in raw) {
+  if (key === 'key') continue
   if (options.has(key)) props[key] = raw[key]  // a declared prop
   else attrs[key] = raw[key]                    // a "fallthrough" attribute
 }
+// Object-syntax extras: defaults for absent props, required/type warnings.
+for (const [key, opt] of options) {
+  if (key in props) {
+    validatePropType(key, props[key], opt)
+  } else {
+    if (opt.required) console.warn(`[minivue] Missing required prop: "${key}"`)
+    if ('default' in opt) props[key] = resolvePropDefault(opt)
+  }
+}
 instance.props = reactive(props) // make props reactive
 ```
+
+The object syntax is checked in dev style: a wrong type or a missing `required` prop
+produces a `console.warn`, never a throw. An object or array `default` must be a
+factory function (`resolvePropDefault` calls it) — otherwise every instance would
+share one mutable object.
 
 `props` are reactive, and that matters. When the parent re-renders and passes a new
 value, `updateComponent` calls `updateProps`, which writes the new value into the
 reactive `props`, and anyone who read that prop in `render`, computed, or watch reacts.
 That's exactly what happens in the test "parent passes, child updates."
+
+`attrs` don't just sit in the instance either. After every render,
+`renderComponentRoot` merges them onto the component's single element root — `class`
+and `style` combine, event handlers both fire, for the rest the outer value wins.
+That's what makes `h(Button, { class: 'primary' })` work without `Button` declaring
+`class`; a component opts out with `inheritAttrs: false`, and a fragment root gets
+nothing (there's nowhere to put them).
 
 ## emit: events flowing bottom-up
 
@@ -161,15 +244,20 @@ The reverse direction. A component doesn't change someone else's data directly �
 
 ```js
 function emit(instance, event, ...args) {
-  const handlerName = 'on' + event[0].toUpperCase() + event.slice(1)
-  const handler = instance.vnode.props[handlerName] // onIncrement
-  if (handler) handler(...args)
+  const props = instance.vnode.props || {}
+  // exact name first, then the camelized form ('value-change' → onValueChange)
+  const handler = props[toHandlerKey(event)] || props[toHandlerKey(camelize(event))]
+  if (handler) callWithErrorHandling(handler, instance, `"${event}" event handler`, args)
 }
 ```
 
 `emit('ping', 42)` looks in the component's props for a function `onPing` and calls it
 with `42`. So the child reports and the parent reacts — data flows down, events bubble
-up. This is the basic contract for component communication.
+up. This is the basic contract for component communication. Two touches match real
+Vue: a kebab-case event (`emit('value-change')`, the template style) is camelized so
+it still finds `onValueChange`, and the handler runs through `callWithErrorHandling` —
+a throw in the parent's handler is routed to the error chain instead of unwinding
+through the child's render that called `emit`.
 
 ## slots: markup from outside
 
@@ -215,6 +303,15 @@ A hook simply adds your function to a list on the current instance, and the rend
 when it reaches the stage, calls the whole list. `onMounted` is handy for fetching data
 from the server (the element is already on the page), `onUnmounted` — for cleanup (clear
 a timer, unsubscribe).
+
+Beyond those, `onActivated`/`onDeactivated` fire when `KeepAlive` (layer 11) hides a
+component instead of destroying it, and `onErrorCaptured` turns a component into an
+error boundary: an error thrown in a descendant's `setup`, `render`, hooks, or event
+handlers walks up the chain of `onErrorCaptured` hooks (returning `false` stops it),
+then goes to `app.config.errorHandler`, then to `console.error` — the whole route
+lives in `errorHandling.js`. Hooks are user code too, so `invokeHooks` wraps each in
+`callWithErrorHandling`: one throwing `onMounted` won't abort the mount or the
+sibling hooks after it.
 
 ## createApp: the entry point
 

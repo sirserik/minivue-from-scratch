@@ -129,19 +129,33 @@ test('computed: reactive inside an effect', () => {
   assert.equal(seen, 10)
 })
 
-test('watch: receives new and old value', () => {
+// watch callbacks are batched into a microtask (flush: 'pre', like Vue), so
+// the tests await Promise.resolve() to let the watch queue drain.
+test('watch: receives new and old value', async () => {
   const count = ref(0)
   const calls = []
   watch(count, (n, o) => calls.push([n, o]))
   count.value = 1
+  await Promise.resolve()
   count.value = 2
+  await Promise.resolve()
   assert.deepEqual(calls, [
     [1, 0],
     [2, 1],
   ])
 })
 
-test('watch: getter and immediate', () => {
+test('watch: batches several synchronous mutations into one call', async () => {
+  const count = ref(0)
+  const calls = []
+  watch(count, (n, o) => calls.push([n, o]))
+  count.value = 1
+  count.value = 2 // same microtask — one callback with the final value
+  await Promise.resolve()
+  assert.deepEqual(calls, [[2, 0]])
+})
+
+test('watch: getter and immediate', async () => {
   const state = reactive({ a: 1, b: 2 })
   const calls = []
   watch(
@@ -151,14 +165,16 @@ test('watch: getter and immediate', () => {
   )
   assert.deepEqual(calls, [3]) // right away
   state.a = 10
+  await Promise.resolve()
   assert.deepEqual(calls, [3, 12])
 })
 
-test('watch: deep watching of a reactive object', () => {
+test('watch: deep watching of a reactive object', async () => {
   const state = reactive({ nested: { value: 1 } })
   let fired = 0
   watch(state, () => fired++)
   state.nested.value = 2
+  await Promise.resolve()
   assert.equal(fired, 1)
 })
 

@@ -30,11 +30,19 @@ export const Fragment = Symbol('Fragment') // a group of nodes with no wrapping 
  * @returns {object} The VNode.
  */
 export function createVNode(type, props = null, children = null) {
+  // `key` is metadata for the diff algorithm, not a real prop. Pull it out
+  // onto the vnode AND remove it from props (on a copy — the caller's object
+  // stays untouched), so it can never leak into the DOM as key="...".
+  const key = props && props.key != null ? props.key : null
+  if (props && 'key' in props) {
+    props = { ...props }
+    delete props.key
+  }
   return {
     type,
     props: props || {},
     children,
-    key: props && props.key != null ? props.key : null,
+    key,
     el: null, // the renderer will put the real DOM node here
   }
 }
@@ -120,6 +128,12 @@ export function normalizeVNode(child) {
   }
   if (typeof child === 'string' || typeof child === 'number') {
     return createVNode(Text, null, String(child))
+  }
+  if (Array.isArray(child)) {
+    // A render function may return an array (several roots). The renderer only
+    // knows how to patch a single VNode, so wrap the array in a Fragment — the
+    // same thing Vue does for multi-root templates.
+    return createVNode(Fragment, null, child)
   }
   // Already a VNode — return it as is.
   return child

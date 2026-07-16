@@ -20,44 +20,63 @@ const stop = watchEffect(() => {
 ```
 
 Он сразу выполняет функцию (и заодно собирает зависимости из того, что она
-прочитала), а потом перезапускает при их изменении. Реализация — буквально эффект,
-который в планировщике перезапускает сам себя:
+прочитала), а потом перезапускает при их изменении. Реализация — эффект, планировщик
+которого ставит перезапуск в ту же микротаск-очередь, что и у `watch`
+(`flush: 'pre'`):
 
 ```js
-export function watchEffect(fn) {
-  const effect = new ReactiveEffect(fn, () => effect.run())
-  effect.run()
+export function watchEffect(fn, options = {}) {
+  // … обвязка onCleanup — такая же, как в watch …
+  const job = () => {
+    if (!effect.active) return
+    runCleanup()
+    effect.run()
+  }
+  const scheduler = options.flush === 'sync' ? job : () => queueWatchJob(job)
+  const effect = new ReactiveEffect(() => fn(onCleanup), scheduler)
+  effect.onStop = runCleanup
+
+  effect.run() // первый запуск: и выполняет, и собирает зависимости
   return () => effect.stop()
 }
 ```
 
 Возвращает функцию остановки — вызвали её, и слежка прекращается (`effect.stop`
-делает `cleanup` и помечает эффект неактивным, см. слой 1).
+делает `cleanup` и помечает эффект неактивным, см. слой 1). Сама функция получает
+`onCleanup` — контракт тот же, что у `watch`: зарегистрированное через него
+выполняется перед каждым перезапуском и при остановке.
 
 ## readonly
 
 Иногда данные надо отдать «только на просмотр» — например, `provide` значения,
 которое потомки не должны менять. `readonly(obj)` возвращает Proxy, где чтение
-работает (в том числе вложенное — тоже становится `readonly`), а запись молча
-запрещена с предупреждением:
+работает (в том числе вложенное — тоже становится `readonly`), а запись и удаление
+молча запрещены с предупреждением:
 
 ```js
+const readonlyHandlers = {
+  get: createGetter(true, false), // общая фабрика геттеров, флаг isReadonly включён
+  set(obj, key) {
+    console.warn(`readonly: cannot modify property "${String(key)}"`)
+    return true // запись «проглатывается», но не выполняется
+  },
+  deleteProperty(obj, key) {
+    console.warn(`readonly: cannot delete property "${String(key)}"`)
+    return true
+  },
+}
+
 export function readonly(target) {
-  return new Proxy(target, {
-    get(obj, key, receiver) {
-      if (key === RAW) return obj
-      const result = Reflect.get(obj, key, receiver)
-      return isObject(result) ? readonly(result) : result // вложенное тоже readonly
-    },
-    set(obj, key) {
-      console.warn(`readonly: нельзя изменять "${String(key)}"`)
-      return true // запись «проглатывается», но не выполняется
-    },
-  })
+  return createReactiveObject(target, readonlyHandlers, readonlyMap, true)
 }
 ```
 
-Отслеживать здесь нечего — значение не меняется, поэтому `track` в `get` не нужен.
+Отслеживать здесь нечего — значение через этот прокси не меняется, поэтому геттер
+(тот же `createGetter` из слоя 1, только с включённым флагом `isReadonly`)
+пропускает `track`; вложенные объекты наружу выходят тоже в `readonly`. Одно честное
+упрощение: Map или Set, переданные в `readonly`, проваливаются в общие перехватчики
+коллекций и read-only-представления не получают — запись в них не блокируется (во
+Vue такие представления есть; мы держим слой маленьким).
 
 ## shallowReactive и shallowRef
 
